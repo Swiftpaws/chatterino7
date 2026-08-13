@@ -174,6 +174,10 @@ set(SOURCE_FILES
 
         controllers/filters/FilterModel.cpp
         controllers/filters/FilterModel.hpp
+        controllers/filters/OutgoingMessageFilter.cpp
+        controllers/filters/OutgoingMessageFilter.hpp
+        controllers/filters/OutgoingMessageFilterModel.cpp
+        controllers/filters/OutgoingMessageFilterModel.hpp
         controllers/filters/FilterRecord.cpp
         controllers/filters/FilterRecord.hpp
         controllers/filters/FilterSet.cpp

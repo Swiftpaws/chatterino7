@@ -8,6 +8,7 @@
 #include "common/enums/MessageOverflow.hpp"
 #include "common/QLogging.hpp"
 #include "controllers/commands/CommandController.hpp"
+#include "controllers/filters/OutgoingMessageFilter.hpp"
 #include "controllers/hotkeys/HotkeyController.hpp"
 #include "controllers/spellcheck/SpellChecker.hpp"
 #include "messages/Link.hpp"
@@ -63,6 +64,36 @@ qreal highlightEasingFunction(qreal progress)
         return 1.0 - pow(10.0 * progress, 3.0);
     }
     return 1.0 + pow((20.0 / 9.0) * (0.5 * progress - 0.5), 3.0);
+}
+
+bool isOutgoingMessageBlocked(const QString &message, const ChannelPtr &channel)
+{
+    if (message.isEmpty())
+    {
+        return false;
+    }
+
+    const auto block = filterOutgoingMessage(
+        message, *getSettings()->outgoingMessageFilters.readOnly());
+    if (!block)
+    {
+        return false;
+    }
+
+    const auto ruleNumber = block->ruleNumber;
+    if (block->reason == OutgoingMessageFilterBlockReason::Invalid)
+    {
+        channel->addSystemMessage(
+            QString("Message not sent: outgoing filter rule %1 is invalid.")
+                .arg(ruleNumber));
+    }
+    else
+    {
+        channel->addSystemMessage(
+            QString("Message not sent: matched outgoing filter rule %1.")
+                .arg(ruleNumber));
+    }
+    return true;
 }
 
 class BackwardsSearchLineEdit : public QLineEdit
@@ -511,6 +542,10 @@ QString SplitInput::handleSendMessage(const std::vector<QString> &arguments)
         QString sendMessage =
             getApp()->getCommands()->execCommand(message, c, false);
 
+        if (isOutgoingMessageBlocked(sendMessage, c))
+        {
+            return "";
+        }
         c->sendMessage(sendMessage);
 
         this->postMessageSend(message, arguments);
@@ -543,6 +578,11 @@ QString SplitInput::handleSendMessage(const std::vector<QString> &arguments)
     message = message.replace('\n', ' ');
     QString sendMessage =
         getApp()->getCommands()->execCommand(message, c, false);
+
+    if (isOutgoingMessageBlocked(sendMessage, c))
+    {
+        return "";
+    }
 
     // Reply within TwitchChannel
     if (tc)

@@ -13,6 +13,7 @@
 #include "common/ThumbnailPreviewMode.hpp"
 #include "common/TimeoutStackStyle.hpp"
 #include "controllers/filters/FilterRecord.hpp"
+#include "controllers/filters/OutgoingMessageFilter.hpp"
 #include "controllers/highlights/HighlightBadge.hpp"
 #include "controllers/highlights/HighlightBlacklistUser.hpp"
 #include "controllers/highlights/HighlightPhrase.hpp"
@@ -889,6 +890,8 @@ private:
         "/pings/muted"};
     ChatterinoSetting<std::vector<FilterRecordPtr>> filterRecordsSetting = {
         "/filtering/filters"};
+    ChatterinoSetting<std::vector<OutgoingMessageFilter>>
+        outgoingMessageFiltersSetting = {"/filtering/outgoingMessageFilters"};
     ChatterinoSetting<std::vector<Nickname>> nicknamesSetting = {"/nicknames"};
     ChatterinoSetting<std::vector<ModerationAction>> moderationActionsSetting =
         {"/moderation/actions"};
@@ -910,6 +913,7 @@ public:
     SignalVector<HighlightBlacklistUser> blacklistedUsers;
     SignalVector<IgnorePhrase> ignoredMessages;
     SignalVector<FilterRecordPtr> filterRecords;
+    SignalVector<OutgoingMessageFilter> outgoingMessageFilters;
     SignalVector<Nickname> nicknames;
     SignalVector<ModerationAction> moderationActions;
     SignalVector<ChannelLog> loggedChannels;

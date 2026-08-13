@@ -8,6 +8,7 @@
 #include "controllers/filters/lang/Filter.hpp"
 #include "controllers/filters/lang/Tokenizer.hpp"
 #include "controllers/filters/lang/Types.hpp"
+#include "controllers/filters/OutgoingMessageFilter.hpp"
 #include "controllers/highlights/HighlightController.hpp"
 #include "messages/Message.hpp"
 #include "messages/MessageBuilder.hpp"
@@ -208,6 +209,58 @@ TEST(Filters, Validity)
             << "Filter::fromString( " << input << " ) should be "
             << (expected ? "valid" : "invalid");
     }
+}
+
+TEST(OutgoingMessageFilters, Evaluation)
+{
+    using Reason = OutgoingMessageFilterBlockReason;
+
+    EXPECT_FALSE(filterOutgoingMessage(
+        "hello", {{.enabled = false, .pattern = "hello"}}));
+    EXPECT_FALSE(filterOutgoingMessage(
+        "hello", {{.enabled = true, .pattern = "HELLO"}}));
+
+    auto anywhere = filterOutgoingMessage(
+        "say hello there", {{.enabled = true, .pattern = "hello"}});
+    ASSERT_TRUE(anywhere);
+    EXPECT_EQ(anywhere->ruleNumber, 1);
+    EXPECT_EQ(anywhere->reason, Reason::Match);
+
+    auto unicode = filterOutgoingMessage(
+        "Grüße", {{.enabled = true, .pattern = R"(\p{L}+ß\p{L}+)"}});
+    ASSERT_TRUE(unicode);
+    EXPECT_EQ(unicode->reason, Reason::Match);
+
+    auto empty = filterOutgoingMessage(
+        "hello", {{.enabled = true, .pattern = ""}});
+    ASSERT_TRUE(empty);
+    EXPECT_EQ(empty->reason, Reason::Invalid);
+
+    auto malformed = filterOutgoingMessage(
+        "hello", {{.enabled = true, .pattern = "("}});
+    ASSERT_TRUE(malformed);
+    EXPECT_EQ(malformed->reason, Reason::Invalid);
+
+    auto firstInvalid = filterOutgoingMessage(
+        "hello",
+        {
+            {.enabled = false, .pattern = "("},
+            {.enabled = true, .pattern = "["},
+            {.enabled = true, .pattern = "hello"},
+        });
+    ASSERT_TRUE(firstInvalid);
+    EXPECT_EQ(firstInvalid->ruleNumber, 2);
+    EXPECT_EQ(firstInvalid->reason, Reason::Invalid);
+
+    auto firstMatch = filterOutgoingMessage(
+        "hello",
+        {
+            {.enabled = true, .pattern = "ell"},
+            {.enabled = true, .pattern = "["},
+        });
+    ASSERT_TRUE(firstMatch);
+    EXPECT_EQ(firstMatch->ruleNumber, 1);
+    EXPECT_EQ(firstMatch->reason, Reason::Match);
 }
 
 TEST(Filters, TypeSynthesis)
