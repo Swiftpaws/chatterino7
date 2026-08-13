@@ -12,6 +12,8 @@
 #include "controllers/hotkeys/HotkeyController.hpp"
 #include "mocks/BaseApplication.hpp"
 #include "mocks/EmoteController.hpp"
+#include "providers/kick/KickChannel.hpp"
+#include "providers/kick/KickChatServer.hpp"
 #include "singletons/Fonts.hpp"
 #include "singletons/Paths.hpp"
 #include "singletons/Settings.hpp"
@@ -64,11 +66,17 @@ public:
         return &this->emotes;
     }
 
+    KickChatServer *getKickChatServer() override
+    {
+        return &this->kickChatServer;
+    }
+
     HotkeyController hotkeys;
     WindowManager windowManager;
     AccountController accounts;
     CommandController commands;
     mock::EmoteController emotes;
+    KickChatServer kickChatServer;
 };
 
 class SplitInputTest : public ::testing::Test
@@ -204,12 +212,16 @@ TEST_F(SplitInputTest, MatchingOutgoingFilterRetainsReply)
     });
     auto reply = std::make_shared<Message>();
     reply->displayName = "forsen";
-    this->input.setReply(reply, this->channel);
+    auto replyChannel = std::make_shared<KickChannel>("test");
+    this->split->setChannel(IndirectChannel(replyChannel));
+    this->input.setReply(reply, replyChannel);
     this->input.setInputText("@forsen blocked");
 
     this->input.send();
 
-    EXPECT_TRUE(this->channel->sentMessages.empty());
+    ASSERT_EQ(replyChannel->countMessages(), 1);
+    EXPECT_EQ(replyChannel->getLastMessage()->messageText,
+              "Message not sent: matched outgoing filter rule 1.");
     EXPECT_EQ(this->input.getInputText(), "@forsen blocked");
     EXPECT_TRUE(this->input.hasReply());
 }
