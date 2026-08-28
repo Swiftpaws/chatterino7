@@ -7,6 +7,8 @@
 #include "Application.hpp"
 #include "controllers/filters/FilterModel.hpp"
 #include "controllers/filters/FilterRecord.hpp"
+#include "controllers/filters/OutgoingMessageFilter.hpp"
+#include "controllers/filters/OutgoingMessageFilterModel.hpp"
 #include "singletons/Settings.hpp"
 #include "singletons/WindowManager.hpp"
 #include "util/LayoutCreator.hpp"
@@ -14,8 +16,10 @@
 #include "widgets/helper/EditableModelView.hpp"
 
 #include <QHeaderView>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QTableView>
+#include <QTabWidget>
 
 namespace chatterino {
 
@@ -26,17 +30,19 @@ FiltersPage::FiltersPage()
 {
     LayoutCreator<FiltersPage> layoutCreator(this);
     auto layout = layoutCreator.setLayoutType<QVBoxLayout>();
+    auto tabs = layout.emplace<QTabWidget>();
 
-    layout.emplace<QLabel>(
+    auto channel = tabs.appendTab(new QVBoxLayout, "Channel");
+    channel.emplace<QLabel>(
         "Selectively display messages in Splits using channel filters. Set "
         "filters under a Split menu.");
     EditableModelView *view =
-        layout
+        channel
             .emplace<EditableModelView>(
                 (new FilterModel(nullptr))
                     ->initialized(&getSettings()->filterRecords))
             .getElement();
-    this->view_ = view;
+    this->channelView_ = view;
 
     view->setTitles({"Name", "Filter", "Valid"});
     view->getTableView()->horizontalHeader()->setSectionResizeMode(
@@ -69,7 +75,7 @@ FiltersPage::FiltersPage()
 
     QObject::connect(view->getTableView(), &QTableView::clicked,
                      [this, view](const QModelIndex &clicked) {
-                         this->tableCellClicked(clicked, view);
+                         this->channelTableCellClicked(clicked, view);
                      });
 
     auto *filterHelpLabel =
@@ -79,9 +85,81 @@ FiltersPage::FiltersPage()
     filterHelpLabel->setOpenExternalLinks(true);
     view->addCustomButton(filterHelpLabel);
 
-    layout.append(
+    channel.append(
         this->createCheckBox("Do not filter my own messages",
                              getSettings()->excludeUserMessagesFromFilter));
+
+    auto outgoing = tabs.appendTab(new QVBoxLayout, "Outgoing");
+    outgoing.emplace<QLabel>(
+        "Prevent messages matching a regular expression from being sent. "
+        "Invalid enabled expressions also prevent sending.");
+    auto *outgoingView =
+        outgoing
+            .emplace<EditableModelView>(
+                (new OutgoingMessageFilterModel(nullptr))
+                    ->initialized(&getSettings()->outgoingMessageFilters))
+            .getElement();
+    this->outgoingView_ = outgoingView;
+    outgoingView->setTitles({"Enabled", "Regex", "Valid"});
+    outgoingView->getTableView()
+        ->horizontalHeader()
+        ->setSectionResizeMode(QHeaderView::Interactive);
+    outgoingView->getTableView()
+        ->horizontalHeader()
+        ->setSectionResizeMode(1, QHeaderView::Stretch);
+    QTimer::singleShot(1, [outgoingView] {
+        outgoingView->getTableView()->resizeColumnsToContents();
+        outgoingView->getTableView()->setColumnWidth(2, 125);
+    });
+    std::ignore = outgoingView->addButtonPressed.connect([] {
+        getSettings()->outgoingMessageFilters.append({
+            .enabled = true,
+            .pattern = "my regex",
+        });
+    });
+    outgoingView->addRegexHelpLink();
+    QObject::connect(outgoingView->getTableView(), &QTableView::clicked,
+                     [this, outgoingView](const QModelIndex &clicked) {
+                         this->outgoingTableCellClicked(clicked, outgoingView);
+                     });
+
+    auto tester = outgoing.emplace<QHBoxLayout>().withoutMargin();
+    tester.emplace<QLabel>("Test message:");
+    auto *testInput = tester.emplace<QLineEdit>().getElement();
+    auto *testResult = tester.emplace<QLabel>("OK").getElement();
+    auto updateTestResult = [testInput, testResult] {
+        const auto result = filterOutgoingMessage(
+            testInput->text(), getSettings()->outgoingMessageFilters.raw());
+        if (!result)
+        {
+            testResult->setText("OK");
+        }
+        else if (result->reason == OutgoingMessageFilterBlockReason::Invalid)
+        {
+            testResult->setText(
+                QString("Filtered: rule %1 is invalid")
+                    .arg(result->ruleNumber));
+        }
+        else
+        {
+            testResult->setText(QString("Filtered: matches rule %1")
+                                    .arg(result->ruleNumber));
+        }
+    };
+    QObject::connect(testInput, &QLineEdit::textChanged, this,
+                     [updateTestResult](const QString &) {
+                         updateTestResult();
+                     });
+    auto *outgoingModel = outgoingView->getModel();
+    QObject::connect(outgoingModel, &QAbstractItemModel::dataChanged, this,
+                     [updateTestResult] { updateTestResult(); });
+    QObject::connect(outgoingModel, &QAbstractItemModel::rowsInserted, this,
+                     [updateTestResult] { updateTestResult(); });
+    QObject::connect(outgoingModel, &QAbstractItemModel::rowsRemoved, this,
+                     [updateTestResult] { updateTestResult(); });
+    QObject::connect(outgoingModel, &QAbstractItemModel::rowsMoved, this,
+                     [updateTestResult] { updateTestResult(); });
+    updateTestResult();
 }
 
 void FiltersPage::onShow()
@@ -89,8 +167,8 @@ void FiltersPage::onShow()
     return;
 }
 
-void FiltersPage::tableCellClicked(const QModelIndex &clicked,
-                                   EditableModelView *view)
+void FiltersPage::channelTableCellClicked(const QModelIndex &clicked,
+                                          EditableModelView *view)
 {
     // valid column
     if (clicked.column() == 2)
@@ -136,11 +214,51 @@ void FiltersPage::tableCellClicked(const QModelIndex &clicked,
     }
 }
 
+void FiltersPage::outgoingTableCellClicked(const QModelIndex &clicked,
+                                           EditableModelView *view)
+{
+    if (clicked.column() != 2)
+    {
+        return;
+    }
+
+    const auto pattern =
+        view->getModel()->data(clicked.siblingAtColumn(1)).toString();
+    const QRegularExpression regex(
+        pattern,
+        QRegularExpression::PatternOption::UseUnicodePropertiesOption);
+    QMessageBox popup(this->window());
+    if (!pattern.isEmpty() && regex.isValid())
+    {
+        popup.setIcon(QMessageBox::Icon::Information);
+        popup.setWindowTitle("Valid regular expression");
+        popup.setText("Regular expression is valid");
+    }
+    else
+    {
+        popup.setIcon(QMessageBox::Icon::Warning);
+        popup.setWindowTitle("Invalid regular expression");
+        popup.setText(pattern.isEmpty() ? "Regular expression is empty"
+                                        : regex.errorString());
+        if (!pattern.isEmpty())
+        {
+            popup.setInformativeText(
+                QString("Error at offset %1").arg(regex.patternErrorOffset()));
+        }
+    }
+    popup.exec();
+}
+
 bool FiltersPage::filterElements(const QString &query)
 {
-    std::array fields{0, 1};
+    std::array channelFields{0, 1};
+    std::array outgoingFields{1};
 
-    return this->view_->filterSearchResults(query, fields);
+    const bool channelMatches =
+        this->channelView_->filterSearchResults(query, channelFields);
+    const bool outgoingMatches =
+        this->outgoingView_->filterSearchResults(query, outgoingFields);
+    return channelMatches || outgoingMatches;
 }
 
 }  // namespace chatterino

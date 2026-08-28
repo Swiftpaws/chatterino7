@@ -245,6 +245,9 @@ Settings::Settings(const Modes &modes, const Args &args,
                            this->mutedChannels);
     initializeSignalVector(this->signalHolder, this->filterRecordsSetting,
                            this->filterRecords);
+    initializeSignalVector(this->signalHolder,
+                           this->outgoingMessageFiltersSetting,
+                           this->outgoingMessageFilters);
     initializeSignalVector(this->signalHolder, this->nicknamesSetting,
                            this->nicknames);
     initializeSignalVector(this->signalHolder, this->moderationActionsSetting,

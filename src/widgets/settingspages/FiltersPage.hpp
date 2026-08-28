@@ -23,10 +23,14 @@ public:
     bool filterElements(const QString &query) override;
 
 private:
-    void tableCellClicked(const QModelIndex &clicked, EditableModelView *view);
+    void channelTableCellClicked(const QModelIndex &clicked,
+                                 EditableModelView *view);
+    void outgoingTableCellClicked(const QModelIndex &clicked,
+                                  EditableModelView *view);
 
     QStringListModel userListModel_;
-    EditableModelView *view_;
+    EditableModelView *channelView_{};
+    EditableModelView *outgoingView_{};
 };
 
 }  // namespace chatterino

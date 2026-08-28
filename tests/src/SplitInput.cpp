@@ -8,9 +8,12 @@
 #include "controllers/accounts/AccountController.hpp"
 #include "controllers/commands/Command.hpp"
 #include "controllers/commands/CommandController.hpp"
+#include "controllers/filters/OutgoingMessageFilter.hpp"
 #include "controllers/hotkeys/HotkeyController.hpp"
 #include "mocks/BaseApplication.hpp"
 #include "mocks/EmoteController.hpp"
+#include "providers/kick/KickChannel.hpp"
+#include "providers/kick/KickChatServer.hpp"
 #include "singletons/Fonts.hpp"
 #include "singletons/Paths.hpp"
 #include "singletons/Settings.hpp"
@@ -63,31 +66,96 @@ public:
         return &this->emotes;
     }
 
+    KickChatServer *getKickChatServer() override
+    {
+        return &this->kickChatServer;
+    }
+
     HotkeyController hotkeys;
     WindowManager windowManager;
     AccountController accounts;
     CommandController commands;
     mock::EmoteController emotes;
+    KickChatServer kickChatServer;
 };
 
-class SplitInputTest
-    : public ::testing::TestWithParam<std::tuple<QString, QString>>
+class SplitInputTest : public ::testing::Test
 {
 public:
+    class TestChannel : public Channel
+    {
+    public:
+        TestChannel()
+            : Channel("test", Type::None)
+        {
+        }
+
+        void sendMessage(const QString &message) override
+        {
+            this->sentMessages.push_back(message);
+        }
+
+        std::vector<QString> sentMessages;
+    };
+
+    class TestSplitInput : public SplitInput
+    {
+    public:
+        using SplitInput::SplitInput;
+
+        void send()
+        {
+            this->handleSendMessage({});
+        }
+
+        bool hasReply() const
+        {
+            return this->replyTarget_ != nullptr;
+        }
+    };
+
     SplitInputTest()
-        : split(new Split(nullptr))
+        : channel(std::make_shared<TestChannel>())
+        , split(new Split(nullptr))
         , input(this->split)
     {
+        this->split->setChannel(IndirectChannel(this->channel));
+    }
+
+    void SetUp() override
+    {
+        this->clearOutgoingFilters();
+    }
+
+    void TearDown() override
+    {
+        this->clearOutgoingFilters();
+    }
+
+    void clearOutgoingFilters()
+    {
+        auto &filters = getSettings()->outgoingMessageFilters;
+        while (!filters.raw().empty())
+        {
+            filters.removeAt(0);
+        }
     }
 
     MockApplication mockApplication;
+    std::shared_ptr<TestChannel> channel;
     Split *split;
-    SplitInput input;
+    TestSplitInput input;
+};
+
+class SplitInputReplyTest
+    : public SplitInputTest,
+      public ::testing::WithParamInterface<std::tuple<QString, QString>>
+{
 };
 
 }  // namespace
 
-TEST_P(SplitInputTest, Reply)
+TEST_P(SplitInputReplyTest, Reply)
 {
     std::tuple<QString, QString> params = this->GetParam();
     auto [inputText, expected] = params;
@@ -104,8 +172,78 @@ TEST_P(SplitInputTest, Reply)
                                 << expected << "', but got '" << actual << "'";
 }
 
+TEST_F(SplitInputTest, MatchingOutgoingFilterRetainsInput)
+{
+    getSettings()->outgoingMessageFilters.append({
+        .enabled = true,
+        .pattern = "blocked",
+    });
+    this->input.setInputText("this is blocked");
+
+    this->input.send();
+
+    EXPECT_TRUE(this->channel->sentMessages.empty());
+    EXPECT_EQ(this->input.getInputText(), "this is blocked");
+    ASSERT_EQ(this->channel->countMessages(), 1);
+    EXPECT_EQ(this->channel->getLastMessage()->messageText,
+              "Message not sent: matched outgoing filter rule 1.");
+}
+
+TEST_F(SplitInputTest, NonMatchingOutgoingFilterSendsAndClears)
+{
+    getSettings()->outgoingMessageFilters.append({
+        .enabled = true,
+        .pattern = "blocked",
+    });
+    this->input.setInputText("allowed");
+
+    this->input.send();
+
+    ASSERT_EQ(this->channel->sentMessages.size(), 1);
+    EXPECT_EQ(this->channel->sentMessages[0], "allowed");
+    EXPECT_TRUE(this->input.getInputText().isEmpty());
+}
+
+TEST_F(SplitInputTest, MatchingOutgoingFilterRetainsReply)
+{
+    getSettings()->outgoingMessageFilters.append({
+        .enabled = true,
+        .pattern = "blocked",
+    });
+    auto reply = std::make_shared<Message>();
+    reply->displayName = "forsen";
+    auto replyChannel = std::make_shared<KickChannel>("test");
+    this->split->setChannel(IndirectChannel(replyChannel));
+    this->input.setReply(reply, replyChannel);
+    this->input.setInputText("@forsen blocked");
+
+    this->input.send();
+
+    ASSERT_EQ(replyChannel->countMessages(), 1);
+    EXPECT_EQ(replyChannel->getLastMessage()->messageText,
+              "Message not sent: matched outgoing filter rule 1.");
+    EXPECT_EQ(this->input.getInputText(), "@forsen blocked");
+    EXPECT_TRUE(this->input.hasReply());
+}
+
+TEST_F(SplitInputTest, FiltersCommandExpandedText)
+{
+    this->mockApplication.commands.items.append(
+        Command{"/expand", "blocked output"});
+    getSettings()->outgoingMessageFilters.append({
+        .enabled = true,
+        .pattern = "blocked output",
+    });
+    this->input.setInputText("/expand");
+
+    this->input.send();
+
+    EXPECT_TRUE(this->channel->sentMessages.empty());
+    EXPECT_EQ(this->input.getInputText(), "/expand");
+}
+
 INSTANTIATE_TEST_SUITE_P(
-    SplitInput, SplitInputTest,
+    SplitInput, SplitInputReplyTest,
     testing::Values(
         // Ensure message is retained
         std::make_tuple<QString, QString>(
