@@ -58,6 +58,8 @@ public:
     void setSmallSize();
     /// Set buttons to be regular size.
     void setRegularSize();
+    /// Set the shared titlebar height while preserving compact/regular widths.
+    void setHeight(int height);
 
 private:
     /// @pre ht must be one of { HTMAXBUTTON, HTMINBUTTON, HTCLOSE }.
@@ -67,6 +69,7 @@ private:
     TitleBarButton *minButton_ = nullptr;
     TitleBarButton *maxButton_ = nullptr;
     TitleBarButton *closeButton_ = nullptr;
+    int height_ = 30;
 };
 
 #endif

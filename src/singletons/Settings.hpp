@@ -25,7 +25,9 @@
 #include "singletons/NativeMessaging.hpp"
 #include "singletons/Toasts.hpp"
 #include "util/RapidJsonSerializeQString.hpp"  // IWYU pragma: keep
+#include "util/QStringHash.hpp"                // IWYU pragma: keep
 #include "util/serialize/List.hpp"             // IWYU pragma: keep
+#include "util/serialize/Container.hpp"        // IWYU pragma: keep
 #include "widgets/NotebookEnums.hpp"
 
 #include <pajlada/settings/setting.hpp>
@@ -35,6 +37,7 @@
 
 #include <optional>
 #include <string_view>
+#include <unordered_map>
 
 using TimeoutButton = std::pair<QString, int>;
 
@@ -175,6 +178,14 @@ public:
 
     FloatSetting uiScale = {"/appearance/uiScale2", 1};
     BoolSetting windowTopMost = {"/appearance/windowAlwaysOnTop", false};
+
+    // Use an independent single-window layout with the compact Teams-inspired
+    // presentation. The regular Chatterino layout is preserved separately.
+    BoolSetting teamsStyleMode = {"/appearance/teamsStyleMode", false};
+    ChatterinoSetting<std::unordered_map<QString, QString>> teamsStyleAliases = {
+        "/appearance/teamsStyleAliases", {}};
+    BoolSetting teamsStyleShowBadges = {
+        "/appearance/teamsStyleShowBadges", true};
 
     float getClampedUiScale() const;
     void setClampedUiScale(float value);

@@ -26,7 +26,8 @@ namespace {
 
 using namespace chatterino;
 
-constexpr QMargins MARGIN{8, 4, 8, 4};
+constexpr QMargins DEFAULT_MARGIN{8, 4, 8, 4};
+constexpr QMargins TEAMS_MARGIN{64, 5, 18, 5};
 constexpr qreal COMPACT_EMOTES_OFFSET = 4;
 
 int maxUncollapsedLines()
@@ -38,8 +39,14 @@ int maxUncollapsedLines()
 
 namespace chatterino {
 
+QMargins MessageLayoutContainer::layoutMargins() const
+{
+    return this->teamsStyle_ ? TEAMS_MARGIN : DEFAULT_MARGIN;
+}
+
 void MessageLayoutContainer::beginLayout(qreal width, float scale,
-                                         float imageScale, MessageFlags flags)
+                                         float imageScale, MessageFlags flags,
+                                         bool teamsStyle)
 {
     this->elements_.clear();
     this->lines_.clear();
@@ -55,6 +62,7 @@ void MessageLayoutContainer::beginLayout(qreal width, float scale,
     this->height_ = 0;
     this->scale_ = scale;
     this->imageScale_ = imageScale;
+    this->teamsStyle_ = teamsStyle;
     this->flags_ = flags;
     auto mediumFontMetrics =
         getApp()->getFonts()->getFontMetrics(FontStyle::ChatMedium, scale);
@@ -149,6 +157,7 @@ void MessageLayoutContainer::addElementNoLineBreak(
 
 void MessageLayoutContainer::breakLine()
 {
+    const auto margin = this->layoutMargins();
     if (this->lineContainsRTL_ || this->isRTL())
     {
         for (size_t i = 0; i < this->elements_.size(); i++)
@@ -168,8 +177,8 @@ void MessageLayoutContainer::breakLine()
 
     if (this->flags_.has(MessageFlag::Centered) && this->elements_.size() > 0)
     {
-        const int marginOffset = int(MARGIN.left() * this->scale_) +
-                                 int(MARGIN.right() * this->scale_);
+        const int marginOffset = int(margin.left() * this->scale_) +
+                                 int(margin.right() * this->scale_);
         xOffset = (this->width_ - marginOffset -
                    this->elements_.at(this->elements_.size() - 1)
                        ->getRect()
@@ -193,7 +202,7 @@ void MessageLayoutContainer::breakLine()
         }
 
         element->setPosition(QPointF{
-            element->getRect().x() + xOffset + (MARGIN.left() * this->scale_),
+            element->getRect().x() + xOffset + (margin.left() * this->scale_),
             element->getRect().y() + this->lineHeight_ + yExtra,
         });
     }
@@ -228,7 +237,7 @@ void MessageLayoutContainer::breakLine()
 
     this->currentX_ = 0;
     this->currentY_ += this->lineHeight_;
-    this->height_ = this->currentY_ + int(MARGIN.bottom() * this->scale_);
+    this->height_ = this->currentY_ + int(margin.bottom() * this->scale_);
     this->lineHeight_ = 0;
     this->line_++;
 }
@@ -578,8 +587,9 @@ bool MessageLayoutContainer::fitsInLine(qreal width) const
 
 qreal MessageLayoutContainer::remainingWidth() const
 {
-    return (this->width_ - int(MARGIN.left() * this->scale_) -
-            int(MARGIN.right() * this->scale_) -
+    const auto margin = this->layoutMargins();
+    return (this->width_ - int(margin.left() * this->scale_) -
+            int(margin.right() * this->scale_) -
             (static_cast<int>(this->line_ + 1) == maxUncollapsedLines()
                  ? this->dotdotdotWidth_
                  : 0)) -
@@ -667,7 +677,8 @@ void MessageLayoutContainer::addElement(MessageLayoutElement *element,
     // top margin
     if (this->elements_.empty())
     {
-        this->currentY_ = int(MARGIN.top() * this->scale_);
+        this->currentY_ =
+            int(this->layoutMargins().top() * this->scale_);
     }
 
     qreal elementLineHeight = element->getRect().height();
@@ -693,7 +704,7 @@ void MessageLayoutContainer::addElement(MessageLayoutElement *element,
         element->getCreator().getFlags().hasNone(
             {MessageElementFlag::EmoteImage}))
     {
-        yOffset -= (MARGIN.top() * this->scale_);
+        yOffset -= (this->layoutMargins().top() * this->scale_);
     }
 
     if (getSettings()->removeSpacesBetweenEmotes &&

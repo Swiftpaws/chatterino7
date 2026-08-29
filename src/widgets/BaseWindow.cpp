@@ -441,6 +441,51 @@ void BaseWindow::setTopMost(bool topMost)
     this->topMostChanged(this->isTopMost_);
 }
 
+void BaseWindow::setCustomFrameColors(const QColor &background,
+                                      const QColor &foreground)
+{
+    this->overrideBackgroundColor_ = background;
+
+    if (this->ui_.titleLabel != nullptr)
+    {
+        auto palette = this->ui_.titleLabel->palette();
+        palette.setColor(QPalette::WindowText, foreground);
+        this->ui_.titleLabel->setPalette(palette);
+    }
+
+    for (auto *button : this->ui_.buttons)
+    {
+        button->setProperty("frameForeground", foreground);
+        button->setProperty("frameBackground", background);
+        button->update();
+    }
+
+    this->update();
+}
+
+void BaseWindow::setCustomFrameHeight(int height)
+{
+    if (!this->hasCustomWindowFrame())
+    {
+        return;
+    }
+
+    if (auto *title = dynamic_cast<BaseWidget *>(this->ui_.titleLabel))
+    {
+        title->setScaleIndependentHeight(height);
+    }
+    for (auto *button : this->ui_.buttons)
+    {
+        button->setScaleIndependentHeight(height);
+    }
+#ifdef USEWINSDK
+    if (this->ui_.titlebarButtons != nullptr)
+    {
+        this->ui_.titlebarButtons->setHeight(height);
+    }
+#endif
+}
+
 #ifdef USEWINSDK
 void BaseWindow::tryApplyTopMost()
 {

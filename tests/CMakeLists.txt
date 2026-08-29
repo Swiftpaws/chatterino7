@@ -64,6 +64,9 @@ set(test_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/InputHighlighter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/BalancedResolverResults.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/UtilSerializeList.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/TeamsStyle.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/TeamsStyleMessage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/TeamsStyleMode.cpp
 
     ${CMAKE_CURRENT_LIST_DIR}/src/lib/Snapshot.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/lib/Snapshot.hpp

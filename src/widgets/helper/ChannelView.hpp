@@ -297,6 +297,9 @@ protected:
                          QPointF &relativePos, int &index);
 
 private:
+    bool isTeamsStyle() const;
+    void applyTeamsStyleColors();
+
     struct InternalCtor {
     };
 

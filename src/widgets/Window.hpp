@@ -18,6 +18,9 @@ class Theme;
 class UpdateDialog;
 class SplitNotebook;
 class Channel;
+class TeamsChatHeader;
+class TeamsTabStrip;
+class Split;
 
 /**
  * @exposeenum c2.WindowType
@@ -32,6 +35,9 @@ public:
     explicit Window(WindowType type, QWidget *parent);
 
     WindowType getType();
+    bool isTeamsStyle() const;
+    void bindTeamsSplit(Split *split);
+    void openTeamsNewChat();
     SplitNotebook &getNotebook();
 
     void setPopupID(size_t id);
@@ -51,16 +57,27 @@ private:
             &actions);
     void addShortcuts() override;
     void addLayout();
+    void showTeamsMenu(QWidget *anchor);
+    void updateTeamsIdentity();
+    void syncTeamsFromNotebook();
+    void updateTeamsTabTitles();
     void onAccountSelected();
     void addMenuBar();
 
     WindowType type_;
+    bool teamsStyle_ = false;
 
     SplitNotebook *notebook_;
+    TeamsChatHeader *teamsHeader_ = nullptr;
+    TeamsTabStrip *teamsTabStrip_ = nullptr;
+    QWidget *teamsTitlebarMore_ = nullptr;
+    Split *teamsSplit_ = nullptr;
     LabelButton *userLabel_ = nullptr;
     std::shared_ptr<UpdateDialog> updateDialogHandle_;
 
     pajlada::Signals::SignalHolder signalHolder_;
+    pajlada::Signals::SignalHolder teamsChannelSignalHolder_;
+    pajlada::Signals::SignalHolder teamsSplitSignalHolder_;
 
     // this is only used on Windows and only on the main window, for the one used otherwise, see SplitNotebook in Notebook.hpp
     PixmapButton *streamerModeTitlebarIcon_ = nullptr;

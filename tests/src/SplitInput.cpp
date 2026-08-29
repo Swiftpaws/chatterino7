@@ -18,8 +18,10 @@
 #include "singletons/WindowManager.hpp"
 #include "Test.hpp"
 #include "widgets/Notebook.hpp"
+#include "widgets/buttons/SvgButton.hpp"
 #include "widgets/splits/Split.hpp"
 
+#include <QApplication>
 #include <QDebug>
 #include <QString>
 
@@ -86,6 +88,55 @@ public:
 };
 
 }  // namespace
+
+TEST(SplitInputTeams, ComposerFrameAndActions)
+{
+    MockApplication mockApplication;
+    auto *split = new Split(nullptr);
+    SplitInput input(split);
+    input.resize(773, 110);
+    input.setTeamsStyle(true);
+    auto *frame = input.findChild<QWidget *>("teamsComposerFrame");
+    ASSERT_NE(frame, nullptr);
+    auto *textEdit = frame->findChild<QTextEdit *>();
+    ASSERT_NE(textEdit, nullptr);
+    for (const auto scale : {1.F, 1.25F, 1.5F})
+    {
+        input.setOverrideScale(scale);
+        frame->resize(400, int(58 * scale));
+        QApplication::processEvents();
+        EXPECT_EQ(frame->minimumHeight(), int(58 * scale));
+        EXPECT_EQ(frame->layout()->contentsMargins().top(), int(8 * scale));
+        EXPECT_EQ(textEdit->font().family(), "Segoe UI");
+        EXPECT_DOUBLE_EQ(textEdit->font().pointSizeF(), 11.0 * scale);
+    }
+
+    SvgButton *teamsEmoji = nullptr;
+    SvgButton *teamsSend = nullptr;
+    for (auto *button : input.findChildren<SvgButton *>())
+    {
+        if (button->accessibleName() == "Emoji")
+        {
+            teamsEmoji = button;
+        }
+        else if (button->accessibleName() == "Send message")
+        {
+            teamsSend = button;
+        }
+    }
+
+    ASSERT_NE(teamsEmoji, nullptr);
+    ASSERT_NE(teamsSend, nullptr);
+    EXPECT_FALSE(teamsEmoji->isHidden());
+    EXPECT_FALSE(teamsSend->isHidden());
+    EXPECT_FALSE(teamsSend->enabled());
+    EXPECT_EQ(teamsEmoji->width(), 48);
+    EXPECT_EQ(teamsSend->height(), 60);
+
+    input.setInputText("hello");
+    QApplication::processEvents();
+    EXPECT_TRUE(teamsSend->enabled());
+}
 
 TEST_P(SplitInputTest, Reply)
 {

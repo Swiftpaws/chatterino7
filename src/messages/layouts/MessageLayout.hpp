@@ -134,6 +134,7 @@ private:
     int layoutState_ = -1;
     float scale_ = -1;
     float imageScale_ = -1.F;
+    bool currentTeamsStyle_ = false;
     MessageElementFlags currentWordFlags_;
 
 #ifdef FOURTF

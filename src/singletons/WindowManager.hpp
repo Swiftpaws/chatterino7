@@ -59,6 +59,7 @@ class WindowManager final : public QObject
 
 public:
     static const QString WINDOW_LAYOUT_FILENAME;
+    static const QString TEAMS_WINDOW_LAYOUT_FILENAME;
 
     explicit WindowManager(const Args &appArgs_, const Paths &paths,
                            Settings &settings, Theme &themes_, Fonts &fonts);
@@ -181,6 +182,7 @@ public:
 private:
     // Load window layout from the window-layout.json file
     WindowLayout loadWindowLayoutFromFile() const;
+    const QString &activeWindowLayoutFilePath() const;
 
     // Apply a window layout for this window manager.
     void applyWindowLayout(const WindowLayout &layout);
@@ -191,6 +193,7 @@ private:
 
     // Contains the full path to the window layout file, e.g. /home/pajlada/.local/share/Chatterino/Settings/window-layout.json
     const QString windowLayoutFilePath;
+    const QString teamsWindowLayoutFilePath;
 
     bool shuttingDown_ = false;
 

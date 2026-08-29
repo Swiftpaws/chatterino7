@@ -15,6 +15,7 @@
 #include "util/QMagicEnum.hpp"
 #include "widgets/helper/ChannelView.hpp"
 #include "widgets/helper/NotebookTab.hpp"
+#include "widgets/helper/TeamsStyle.hpp"
 #include "widgets/Notebook.hpp"
 #include "widgets/splits/ClosedSplits.hpp"
 #include "widgets/splits/DraggedSplit.hpp"
@@ -629,7 +630,11 @@ void SplitContainer::paintSplitBorder(Node *node, QPainter *painter)
     {
         case Node::Type::Split: {
             QRectF nodeRect = node->geometry_;
-            painter->setPen(this->theme->tabs.dividerLine);
+            auto *chatWindow = qobject_cast<Window *>(this->window());
+            painter->setPen(chatWindow != nullptr &&
+                                    chatWindow->isTeamsStyle()
+                                ? currentTeamsStylePalette().divider
+                                : this->theme->tabs.dividerLine);
             QPainterPath p = QPainterPath();
             p.addRect(nodeRect);
             painter->strokePath(p, painter->pen());

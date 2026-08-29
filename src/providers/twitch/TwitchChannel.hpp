@@ -26,6 +26,7 @@
 #include <QRegularExpression>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -85,6 +86,10 @@ namespace detail {
 /// ".@badcommand hello" should NOT be allowed
 /// ".@badcommand hello" should NOT be allowed
 bool isUnknownCommand(const QString &text);
+
+bool shouldAcceptChatterCountResult(uint64_t requestGeneration,
+                                    uint64_t currentGeneration,
+                                    bool hasModRights);
 
 }  // namespace detail
 
@@ -216,6 +221,7 @@ public:
     const QString &channelUrl();
     const QString &popoutPlayerUrl();
     int chatterCount() const;
+    std::optional<int> knownChatterCount() const;
     bool isLive() const override;
     bool isRerun() const override;
     QString roomId() const;
@@ -350,6 +356,8 @@ public:
      * or the viewer count changes, or the title has been updated
      **/
     pajlada::Signals::NoArgSignal streamStatusChanged;
+
+    pajlada::Signals::NoArgSignal chatterCountChanged;
 
     pajlada::Signals::NoArgSignal roomModesChanged;
 
@@ -546,7 +554,8 @@ private:
     const QString subscriptionUrl_;
     const QString channelUrl_;
     const QString popoutPlayerUrl_;
-    int chatterCount_{};
+    std::optional<int> chatterCount_;
+    uint64_t chatterCountRequestGeneration_{};
     UniqueAccess<StreamStatus> streamStatus_;
     UniqueAccess<RoomModes> roomModes;
     bool disconnected_{};

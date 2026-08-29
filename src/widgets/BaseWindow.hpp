@@ -106,6 +106,15 @@ public:
 
     static bool supportsCustomWindowFrame();
 
+    /// Override only this window's custom frame colors. This is used by
+    /// specialized popup presentations without changing the global theme.
+    void setCustomFrameColors(const QColor &background,
+                              const QColor &foreground);
+
+    /// Override this window's custom titlebar height without changing the
+    /// global UI scale.
+    void setCustomFrameHeight(int height);
+
 Q_SIGNALS:
     void topMostChanged(bool topMost);
 

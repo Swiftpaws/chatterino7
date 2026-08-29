@@ -101,6 +101,7 @@ struct MessageLayoutContext {
     float imageScale = 1;
 
     Channel *selectedChannel = nullptr;
+    bool teamsStyle = false;
     const Message &message;
 };
 

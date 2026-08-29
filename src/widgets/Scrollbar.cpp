@@ -9,6 +9,8 @@
 #include "singletons/Theme.hpp"
 #include "singletons/WindowManager.hpp"
 #include "widgets/helper/ChannelView.hpp"
+#include "widgets/helper/TeamsStyle.hpp"
+#include "widgets/Window.hpp"
 
 #include <QMouseEvent>
 #include <QPainter>
@@ -295,7 +297,12 @@ void Scrollbar::paintEvent(QPaintEvent * /*event*/)
         mouseOver ? 0 : this->width() - static_cast<int>(4.0F * this->scale());
 
     QPainter painter(this);
-    painter.fillRect(this->rect(), this->theme->scrollbars.background);
+    const auto *chatWindow = qobject_cast<const Window *>(this->window());
+    const bool teamsStyle =
+        chatWindow != nullptr && chatWindow->isTeamsStyle();
+    const auto teamsPalette = currentTeamsStylePalette();
+    painter.fillRect(this->rect(), teamsStyle ? teamsPalette.canvas
+                                              : this->theme->scrollbars.background);
 
     bool enableRedeemedHighlights = getSettings()->enableRedeemedHighlight;
     bool enableFirstMessageHighlights =
@@ -308,13 +315,18 @@ void Scrollbar::paintEvent(QPaintEvent * /*event*/)
         // mouse over thumb
         if (this->mouseDownLocation_ == MouseLocation::InsideThumb)
         {
-            painter.fillRect(this->thumbRect_,
-                             this->theme->scrollbars.thumbSelected);
+            painter.fillRect(
+                this->thumbRect_,
+                teamsStyle ? teamsPalette.accent
+                           : this->theme->scrollbars.thumbSelected);
         }
         // mouse not over thumb
         else
         {
-            painter.fillRect(this->thumbRect_, this->theme->scrollbars.thumb);
+            painter.fillRect(
+                this->thumbRect_,
+                teamsStyle ? teamsPalette.controlBorder
+                           : this->theme->scrollbars.thumb);
         }
     }
 

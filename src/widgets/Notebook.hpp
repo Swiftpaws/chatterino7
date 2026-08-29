@@ -116,6 +116,10 @@ public:
     int getSelectedIndex() const;
     QWidget *getSelectedPage() const;
 
+    pajlada::Signals::Signal<int> pageCountChanged;
+    pajlada::Signals::Signal<QWidget *> selectedPageChanged;
+    pajlada::Signals::NoArgSignal pagesReordered;
+
     QWidget *tabAt(QPoint point, int &index, int maxWidth = 2000000000);
     void rearrangePage(QWidget *page, int index);
 
@@ -124,6 +128,10 @@ public:
 
     bool getShowAddButton() const;
     void setShowAddButton(bool value);
+
+    /// Set tab-strip visibility for this notebook only without changing the
+    /// user's global tab-visibility setting.
+    void setTabsVisible(bool value);
 
     void setTabLocation(NotebookTabLocation location);
 

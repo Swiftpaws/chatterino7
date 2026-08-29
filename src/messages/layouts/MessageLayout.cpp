@@ -8,14 +8,17 @@
 #include "messages/layouts/MessageLayoutContainer.hpp"
 #include "messages/layouts/MessageLayoutContext.hpp"
 #include "messages/layouts/MessageLayoutElement.hpp"
+#include "messages/layouts/TeamsStyleMessage.hpp"
 #include "messages/Message.hpp"
 #include "messages/MessageElement.hpp"
 #include "messages/Selection.hpp"
 #include "providers/colors/ColorProvider.hpp"
+#include "singletons/Fonts.hpp"
 #include "singletons/Settings.hpp"
 #include "singletons/StreamerMode.hpp"
 #include "singletons/WindowManager.hpp"
 #include "util/DebugCount.hpp"
+#include "widgets/helper/TeamsStyle.hpp"
 
 #include <QApplication>
 #include <QDebug>
@@ -96,6 +99,8 @@ bool MessageLayout::layout(const MessageLayoutContext &ctx,
     // check if work mask changed
     layoutRequired |= this->currentWordFlags_ != ctx.flags;
     this->currentWordFlags_ = ctx.flags;  // getSettings()->getWordTypeMask();
+    layoutRequired |= this->currentTeamsStyle_ != ctx.teamsStyle;
+    this->currentTeamsStyle_ = ctx.teamsStyle;
 
     // check if layout was requested manually
     layoutRequired |= this->flags.has(MessageLayoutFlag::RequiresLayout);
@@ -151,11 +156,55 @@ void MessageLayout::actuallyLayout(const MessageLayoutContext &ctx)
     bool hideSimilar = getSettings()->hideSimilar;
     bool hideReplies = !ctx.flags.has(MessageElementFlag::RepliedMessage);
 
-    this->container_.beginLayout(ctx.width, this->scale_, this->imageScale_,
-                                 messageFlags);
+    this->container_.beginLayout(
+        ctx.width, this->scale_, this->imageScale_, messageFlags,
+        ctx.teamsStyle);
+
+    const bool teamsStyle = ctx.teamsStyle;
+    if (teamsStyle && !this->message_->loginName.isEmpty())
+    {
+        bool addedAuthorLine = false;
+        for (const auto &element : this->message_->elements)
+        {
+            if (teamsAuthorRole(element->getFlags()) ==
+                TeamsAuthorRole::Badge)
+            {
+                element->addToContainer(this->container_, ctx);
+                addedAuthorLine = true;
+            }
+        }
+        for (const auto &element : this->message_->elements)
+        {
+            if (teamsAuthorRole(element->getFlags()) ==
+                TeamsAuthorRole::Username)
+            {
+                element->addToContainer(this->container_, ctx);
+                addedAuthorLine = true;
+            }
+        }
+        for (const auto &element : this->message_->elements)
+        {
+            if (teamsAuthorRole(element->getFlags()) ==
+                TeamsAuthorRole::Timestamp)
+            {
+                element->addToContainer(this->container_, ctx);
+                addedAuthorLine = true;
+            }
+        }
+        if (addedAuthorLine)
+        {
+            this->container_.breakLine();
+        }
+    }
 
     for (const auto &element : this->message_->elements)
     {
+        if (teamsStyle &&
+            teamsAuthorRole(element->getFlags()) != TeamsAuthorRole::None)
+        {
+            continue;
+        }
+
         if (hideModerated && this->message_->flags.has(MessageFlag::Disabled))
         {
             continue;
@@ -260,7 +309,8 @@ MessagePaintResult MessageLayout::paint(const MessagePaintContext &ctx)
     }
 
     if (this->message_->flags.has(MessageFlag::RecentMessage) &&
-        ctx.preferences.fadeMessageHistory)
+        ctx.preferences.fadeMessageHistory &&
+        !this->currentTeamsStyle_)
     {
         ctx.painter.fillRect(
             QRect{
@@ -465,6 +515,55 @@ void MessageLayout::updateBuffer(QPixmap *buffer,
     }
 
     painter.fillRect(buffer->rect(), backgroundColor);
+
+    const bool teamsStyle = this->currentTeamsStyle_;
+    if (teamsStyle && !this->message_->loginName.isEmpty())
+    {
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const auto teamsPalette = currentTeamsStylePalette();
+
+        if (this->message_->loginName.endsWith("bot", Qt::CaseInsensitive))
+        {
+            const QRectF botSurface(
+                58 * this->scale_, 3 * this->scale_,
+                std::max<qreal>(0, buffer->width() / buffer->devicePixelRatioF() -
+                                      76 * this->scale_),
+                std::max<qreal>(0, this->container_.getHeight() -
+                                      6 * this->scale_));
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(teamsPalette.raisedSurface);
+            painter.drawRoundedRect(botSurface, 6 * this->scale_,
+                                    6 * this->scale_);
+        }
+
+        QColor avatarBase = this->message_->usernameColor;
+        if (!avatarBase.isValid())
+        {
+            avatarBase = teamsPalette.accent;
+        }
+        const QColor avatarBackground =
+            blendColors(teamsPalette.canvas,
+                        QColor(avatarBase.red(), avatarBase.green(),
+                               avatarBase.blue(),
+                               getTheme()->isLightTheme() ? 72 : 110));
+        const QColor avatarText = ensureTeamsContrast(
+            avatarBase, avatarBackground, 4.5, teamsPalette.primaryText);
+        const QRectF avatarRect(18 * this->scale_, 5 * this->scale_,
+                                30 * this->scale_, 30 * this->scale_);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(avatarBackground);
+        painter.drawEllipse(avatarRect);
+
+        const QString avatarName =
+            this->message_->displayName.isEmpty()
+                ? this->message_->loginName
+                : this->message_->displayName;
+        painter.setFont(getApp()->getFonts()->getFont(
+            FontStyle::ChatMediumBold, this->scale_));
+        painter.setPen(avatarText);
+        painter.drawText(avatarRect, Qt::AlignCenter,
+                         avatarName.left(1).toUpper());
+    }
 
     // draw message
     this->container_.paintElements(painter, ctx);

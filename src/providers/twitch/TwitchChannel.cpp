@@ -68,6 +68,13 @@ using namespace std::chrono_literals;
 
 namespace detail {
 
+bool shouldAcceptChatterCountResult(uint64_t requestGeneration,
+                                    uint64_t currentGeneration,
+                                    bool hasModRights)
+{
+    return hasModRights && requestGeneration == currentGeneration;
+}
+
 bool isUnknownCommand(const QString &text)
 {
     static QRegularExpression isUnknownCommand(
@@ -146,9 +153,16 @@ TwitchChannel::TwitchChannel(const QString &name)
 
     this->signalHolder_.managedConnect(
         getApp()->getAccounts()->twitch.currentUserChanged, [this] {
+            ++this->chatterCountRequestGeneration_;
             this->setMod(false);
+            if (this->chatterCount_.has_value())
+            {
+                this->chatterCount_.reset();
+                this->chatterCountChanged.invoke();
+            }
             this->refreshPubSub();
             this->refreshTwitchChannelEmotes(false);
+            this->refreshChatters();
         });
 
     this->refreshPubSub();
@@ -935,6 +949,7 @@ void TwitchChannel::setMod(bool value)
 {
     if (this->mod_ != value)
     {
+        ++this->chatterCountRequestGeneration_;
         this->mod_ = value;
 
         this->userStateChanged.invoke();
@@ -943,6 +958,12 @@ void TwitchChannel::setMod(bool value)
         {
             // Gained mod privileges - fetch the current pin
             this->refreshPinnedMessage();
+            this->refreshChatters();
+        }
+        else if (this->chatterCount_.has_value() && !this->isBroadcaster())
+        {
+            this->chatterCount_.reset();
+            this->chatterCountChanged.invoke();
         }
     }
 }
@@ -1419,6 +1440,11 @@ const QString &TwitchChannel::popoutPlayerUrl()
 
 int TwitchChannel::chatterCount() const
 {
+    return this->chatterCount_.value_or(0);
+}
+
+std::optional<int> TwitchChannel::knownChatterCount() const
+{
     return this->chatterCount_;
 }
 
@@ -1753,6 +1779,8 @@ void TwitchChannel::refreshChatters()
         return;
     }
 
+    const auto requestGeneration = ++this->chatterCountRequestGeneration_;
+
     // setting?
     const auto streamStatus = this->accessStreamStatus();
     const auto viewerCount = static_cast<int>(streamStatus->viewerCount);
@@ -1770,11 +1798,22 @@ void TwitchChannel::refreshChatters()
         this->roomId(),
         getApp()->getAccounts()->twitch.getCurrent()->getUserId(),
         MAX_CHATTERS_TO_FETCH,
-        [weak = this->weakFromThis()](const auto &result) {
+        [weak = this->weakFromThis(), requestGeneration](const auto &result) {
             if (auto shared = weak.lock())
             {
+                if (!detail::shouldAcceptChatterCountResult(
+                        requestGeneration,
+                        shared->chatterCountRequestGeneration_,
+                        shared->hasModRights()))
+                {
+                    return;
+                }
                 shared->updateOnlineChatters(result.chatters);
-                shared->chatterCount_ = result.total;
+                if (shared->chatterCount_ != result.total)
+                {
+                    shared->chatterCount_ = result.total;
+                    shared->chatterCountChanged.invoke();
+                }
             }
         },
         // Refresh chatters should only be used when failing silently is an option

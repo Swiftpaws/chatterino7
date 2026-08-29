@@ -7,6 +7,7 @@
 #include "singletons/Theme.hpp"
 
 #include <QPainterPath>
+#include <QVariant>
 
 namespace chatterino {
 
@@ -37,8 +38,16 @@ void TitleBarButton::paintContent(QPainter &painter)
 {
     painter.setOpacity(this->currentContentOpacity());
 
-    QColor color = this->theme->window.text;
-    QColor background = this->theme->window.background;
+    QColor color = this->property("frameForeground").value<QColor>();
+    if (!color.isValid())
+    {
+        color = this->theme->window.text;
+    }
+    QColor background = this->property("frameBackground").value<QColor>();
+    if (!background.isValid())
+    {
+        background = this->theme->window.background;
+    }
 
     int xD = this->height() / 3;
     int centerX = this->width() / 2;
@@ -62,7 +71,7 @@ void TitleBarButton::paintContent(QPainter &painter)
 
             painter.setPen(color);
             painter.drawRect(centerX - xD / 2 + xD2, xD, xD3, xD3);
-            painter.setBrush(this->theme->window.background);
+            painter.setBrush(background);
             painter.drawRect(centerX - xD / 2, xD + xD2, xD3, xD3);
             break;
         }

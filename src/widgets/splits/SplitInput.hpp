@@ -52,6 +52,7 @@ public:
 
     void setReply(MessagePtr target, std::weak_ptr<Channel> channel);
     void setPlaceholderText(const QString &text);
+    void setTeamsStyle(bool enabled);
 
     /**
      * @brief Hide the widget
@@ -126,6 +127,9 @@ protected:
     void onCursorPositionChanged();
     void onTextChanged();
     void updateEmoteButton();
+    void updateTeamsSendButtonState();
+    void updateTeamsScrollbarStyle();
+    bool teamsCanSend(const QString &text) const;
     void updateCompletionPopup();
     void showCompletionPopup(const QString &text, CompletionKind kind);
     void hideCompletionPopup();
@@ -174,6 +178,8 @@ protected:
         LabelButton *sendButton;
         QLabel *sendWaitStatus;
         SvgButton *emoteButton;
+        SvgButton *teamsEmoteButton;
+        SvgButton *teamsSendButton;
         QWidget *historySearchWrap;
         QLineEdit *historySearchInput;
         QLabel *historySearchLabel;
@@ -194,6 +200,7 @@ protected:
     // focus events don't work as expected, so instead we use this bool and
     // set the height of the split input to 0 if we're supposed to be hidden instead
     bool hidden{false};
+    bool teamsStyle_ = false;
 
     /// Updates the text edit palette using the current theme
     /// and current "backgroundColor" property

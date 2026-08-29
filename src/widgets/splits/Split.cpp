@@ -34,6 +34,7 @@
 #include "widgets/helper/NotebookTab.hpp"
 #include "widgets/helper/ResizingTextEdit.hpp"
 #include "widgets/helper/SearchPopup.hpp"
+#include "widgets/helper/TeamsStyle.hpp"
 #include "widgets/Notebook.hpp"
 #include "widgets/OverlayWindow.hpp"
 #include "widgets/Scrollbar.hpp"
@@ -113,6 +114,17 @@ Split::Split(QWidget *parent)
     this->vbox_->addWidget(this->pinnedBanner_);
     this->vbox_->addWidget(this->view_, 1);
     this->vbox_->addWidget(this->input_);
+
+    if (auto *chatWindow = qobject_cast<Window *>(this->window());
+        chatWindow != nullptr && chatWindow->isTeamsStyle())
+    {
+        this->vbox_->setContentsMargins(0, 0, 0, 0);
+        this->header_->hide();
+        this->view_->updateColorTheme();
+        this->input_->setTeamsStyle(true);
+        this->themeChangedEvent();
+        chatWindow->bindTeamsSplit(this);
+    }
 
     this->input_->ui_.textEdit->installEventFilter(parent);
 
@@ -320,6 +332,24 @@ Split::Split(QWidget *parent)
                                            this->clearShortcuts();
                                            this->addShortcuts();
                                        });
+}
+
+void Split::themeChangedEvent()
+{
+    BaseWidget::themeChangedEvent();
+    auto *chatWindow = qobject_cast<Window *>(this->window());
+    if (chatWindow == nullptr || !chatWindow->isTeamsStyle())
+    {
+        return;
+    }
+
+    const auto teamsPalette = currentTeamsStylePalette();
+    this->setAutoFillBackground(true);
+    auto widgetPalette = this->palette();
+    widgetPalette.setColor(QPalette::Window, teamsPalette.canvas);
+    this->setPalette(widgetPalette);
+    this->view_->updateColorTheme();
+    this->update();
 }
 
 void Split::addShortcuts()
@@ -791,7 +821,32 @@ PinnedMessageWidget *Split::getPinnedBanner() const
 
 void Split::updateInputPlaceholder()
 {
+    const auto teamsStyle = [this] {
+        auto *chatWindow = qobject_cast<Window *>(this->window());
+        return chatWindow != nullptr && chatWindow->isTeamsStyle();
+    }();
     auto channel = this->getChannel();
+
+    if (teamsStyle)
+    {
+        if (channel->isTwitchChannel() &&
+            !getApp()->getAccounts()->twitch.isLoggedIn())
+        {
+            this->input_->ui_.textEdit->setPlaceholderText(
+                "Log in to send messages...");
+            return;
+        }
+        if (channel->isKickChannel() &&
+            !getApp()->getAccounts()->kick.isLoggedIn())
+        {
+            this->input_->ui_.textEdit->setPlaceholderText(
+                "Log in to send messages...");
+            return;
+        }
+        this->input_->ui_.textEdit->setPlaceholderText("Type a message");
+        return;
+    }
+
     if (auto *multiChannel = dynamic_cast<MultiChannel *>(channel.get()))
     {
         const auto *active = multiChannel->activeChannel();

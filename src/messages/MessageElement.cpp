@@ -22,6 +22,7 @@
 #include "singletons/Theme.hpp"
 #include "util/DebugCount.hpp"
 #include "util/Variant.hpp"
+#include "widgets/helper/TeamsStyle.hpp"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -805,8 +806,11 @@ void TextElement::addToContainer(MessageLayoutContainer &container,
 
     if (ctx.flags.hasAny(this->getFlags()))
     {
+        const bool teamsStyle = ctx.teamsStyle;
+        const qreal textScale =
+            teamsStyle ? container.getScale() * 1.12 : container.getScale();
         auto metrics =
-            app->getFonts()->getFontMetrics(this->style_, container.getScale());
+            app->getFonts()->getFontMetrics(this->style_, textScale);
 
         for (const auto &word : this->words_)
         {
@@ -815,12 +819,26 @@ void TextElement::addToContainer(MessageLayoutContainer &container,
             auto getTextLayoutElement = [&](QString text, qreal width,
                                             bool hasTrailingSpace) {
                 auto color = this->color_.getColor(ctx.messageColors);
-                app->getThemes()->normalizeColor(color);
+                if (teamsStyle)
+                {
+                    const auto palette = currentTeamsStylePalette();
+                    const auto background =
+                        ctx.message.loginName.endsWith("bot",
+                                                       Qt::CaseInsensitive)
+                            ? palette.raisedSurface
+                            : palette.canvas;
+                    color = ensureTeamsContrast(color, background, 4.5,
+                                                palette.primaryText);
+                }
+                else
+                {
+                    app->getThemes()->normalizeColor(color);
+                }
 
                 auto *e = new TextLayoutElement(
                     *this, text, QSizeF(width, metrics.height()), color,
-                    this->style_, this->color_.type(), container.getScale(),
-                    container.getImageScale() / container.getScale());
+                    this->style_, this->color_.type(), textScale,
+                    container.getImageScale() / textScale);
                 e->setTrailingSpace(hasTrailingSpace);
                 e->setText(text);
                 e->setWordId(wordId);
@@ -1065,17 +1083,33 @@ void SingleLineTextElement::addToContainer(MessageLayoutContainer &container,
 
     if (ctx.flags.hasAny(this->getFlags()))
     {
+        const bool teamsStyle = ctx.teamsStyle;
+        const qreal textScale =
+            teamsStyle ? container.getScale() * 1.12 : container.getScale();
         auto metrics =
-            app->getFonts()->getFontMetrics(this->style_, container.getScale());
+            app->getFonts()->getFontMetrics(this->style_, textScale);
 
         auto getTextLayoutElement = [&](QString text, qreal width,
                                         bool hasTrailingSpace) {
             auto color = this->color_.getColor(ctx.messageColors);
-            app->getThemes()->normalizeColor(color);
+            if (teamsStyle)
+            {
+                const auto palette = currentTeamsStylePalette();
+                const auto background =
+                    ctx.message.loginName.endsWith("bot", Qt::CaseInsensitive)
+                        ? palette.raisedSurface
+                        : palette.canvas;
+                color = ensureTeamsContrast(color, background, 4.5,
+                                            palette.primaryText);
+            }
+            else
+            {
+                app->getThemes()->normalizeColor(color);
+            }
 
             auto *e = new TextLayoutElement(
                 *this, text, QSizeF(width, metrics.height()), color,
-                this->style_, this->color_.type(), container.getScale());
+                this->style_, this->color_.type(), textScale);
             e->setTrailingSpace(hasTrailingSpace);
             e->setText(text);
 

@@ -7,6 +7,7 @@
 #include "Application.hpp"
 #include "common/enums/MessageOverflow.hpp"
 #include "common/QLogging.hpp"
+#include "controllers/accounts/AccountController.hpp"
 #include "controllers/commands/CommandController.hpp"
 #include "controllers/hotkeys/HotkeyController.hpp"
 #include "controllers/spellcheck/SpellChecker.hpp"
@@ -31,6 +32,7 @@
 #include "widgets/helper/CmdDeleteKeyFilter.hpp"
 #include "widgets/helper/MessageView.hpp"
 #include "widgets/helper/ResizingTextEdit.hpp"
+#include "widgets/helper/TeamsStyle.hpp"
 #include "widgets/Notebook.hpp"
 #include "widgets/Scrollbar.hpp"
 #include "widgets/splits/InputCompletionPopup.hpp"
@@ -98,6 +100,60 @@ protected:
     }
 };
 
+class TeamsComposerFrame : public QWidget
+{
+public:
+    explicit TeamsComposerFrame(QWidget *parent = nullptr)
+        : QWidget(parent)
+    {
+    }
+
+    void setTeamsStyle(bool enabled, float scale)
+    {
+        this->teamsStyle_ = enabled;
+        this->scale_ = scale;
+        this->update();
+    }
+
+    void setFocused(bool focused)
+    {
+        if (this->focused_ == focused)
+        {
+            return;
+        }
+        this->focused_ = focused;
+        this->update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        if (!this->teamsStyle_)
+        {
+            QWidget::paintEvent(event);
+            return;
+        }
+
+        const auto palette = currentTeamsStylePalette();
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setBrush(palette.canvas);
+        auto outline = this->focused_ ? palette.controlBorder : palette.divider;
+        if (this->focused_)
+        {
+            outline.setAlphaF(0.55F);
+        }
+        painter.setPen(QPen(outline, 1.0));
+        auto frame = teamsComposerFrameRect(QRectF(this->rect()));
+        painter.drawRoundedRect(frame, 7 * this->scale_, 7 * this->scale_);
+    }
+
+private:
+    bool teamsStyle_ = false;
+    bool focused_ = false;
+    float scale_ = 1.F;
+};
+
 }  // namespace
 
 SplitInput::SplitInput(Split *_chatWidget, bool enableInlineReplying)
@@ -131,6 +187,17 @@ SplitInput::SplitInput(QWidget *parent, Split *_chatWidget,
             this->checkSpellingChanged();
         },
         this->signalHolder_);
+
+    this->signalHolder_.managedConnect(
+        getApp()->getAccounts()->twitch.currentUserChanged,
+        [this] {
+            this->updateTeamsSendButtonState();
+        });
+    this->signalHolder_.managedConnect(
+        getApp()->getAccounts()->kick.currentUserChanged,
+        [this] {
+            this->updateTeamsSendButtonState();
+        });
 
     // misc
     this->installTextEditEvents();
@@ -243,8 +310,9 @@ void SplitInput::initLayout()
     replyCancelButton->hide();
     replyLabel->hide();
 
-    auto inputWrapper =
-        layout.emplace<QWidget>().assign(&this->ui_.inputWrapper);
+    auto inputWrapper = layout.emplace<TeamsComposerFrame>().assign(
+        &this->ui_.inputWrapper);
+    inputWrapper->setObjectName("teamsComposerFrame");
     inputWrapper->setContentsMargins(1, 1, 1, 1);
 
     // hbox for input, right box
@@ -272,7 +340,7 @@ void SplitInput::initLayout()
 
     getSettings()->showSendButton.connect(
         [this](const bool value, auto) {
-            if (value)
+            if (value && !this->teamsStyle_)
             {
                 this->ui_.sendButton->show();
             }
@@ -307,6 +375,28 @@ void SplitInput::initLayout()
         box->addWidget(this->ui_.emoteButton, 0, Qt::AlignRight);
     }
 
+    const SvgButton::Src teamsEmojiSource{
+        .dark = ":/buttons/teamsEmoji.svg",
+        .light = ":/buttons/teamsEmoji.svg",
+    };
+    const SvgButton::Src teamsSendSource{
+        .dark = ":/buttons/teamsSend.svg",
+        .light = ":/buttons/teamsSend.svg",
+    };
+    this->ui_.teamsEmoteButton =
+        new SvgButton(teamsEmojiSource, nullptr, QSize{6, 8});
+    this->ui_.teamsSendButton =
+        new SvgButton(teamsSendSource, nullptr, QSize{6, 8});
+    this->ui_.teamsEmoteButton->hide();
+    this->ui_.teamsSendButton->hide();
+    this->ui_.teamsEmoteButton->setToolTip("Emoji, GIFs and stickers");
+    this->ui_.teamsEmoteButton->setAccessibleName("Emoji");
+    this->ui_.teamsSendButton->setToolTip("Send");
+    this->ui_.teamsSendButton->setAccessibleName("Send message");
+    this->ui_.teamsSendButton->setEnabled(false);
+    hboxLayout->addWidget(this->ui_.teamsEmoteButton, 0, Qt::AlignVCenter);
+    hboxLayout->addWidget(this->ui_.teamsSendButton, 0, Qt::AlignVCenter);
+
     // ---- misc
 
     // set edit font
@@ -325,6 +415,22 @@ void SplitInput::initLayout()
     // open emote popup
     QObject::connect(this->ui_.emoteButton, &Button::leftClicked, [this] {
         this->openEmotePopup();
+    });
+    QObject::connect(this->ui_.teamsEmoteButton, &Button::leftClicked, [this] {
+        this->openEmotePopup();
+    });
+    QObject::connect(this->ui_.teamsSendButton, &Button::leftClicked, [this] {
+        std::vector<QString> arguments;
+        this->handleSendMessage(arguments);
+    });
+
+    std::ignore = this->ui_.textEdit->focused.connect([this] {
+        static_cast<TeamsComposerFrame *>(this->ui_.inputWrapper)
+            ->setFocused(true);
+    });
+    std::ignore = this->ui_.textEdit->focusLost.connect([this] {
+        static_cast<TeamsComposerFrame *>(this->ui_.inputWrapper)
+            ->setFocused(false);
     });
 
     // clear input and remove reply thread
@@ -372,8 +478,17 @@ void SplitInput::triggerSelfMessageReceived()
 
 void SplitInput::scaleChangedEvent(float scale)
 {
+    if (this->teamsStyle_)
+    {
+        this->ui_.inputWrapper->setMinimumHeight(int(58 * scale));
+        this->ui_.inputHbox->setContentsMargins(
+            int(16 * scale), int(8 * scale), int(8 * scale), int(8 * scale));
+        this->applyOuterMargin();
+    }
+
     // update the icon size of the buttons
     this->updateEmoteButton();
+    this->updateTeamsScrollbarStyle();
     this->updateCancelReplyButton();
 
     // set maximum height
@@ -390,6 +505,33 @@ void SplitInput::scaleChangedEvent(float scale)
 
 void SplitInput::themeChangedEvent()
 {
+    if (this->teamsStyle_)
+    {
+        const auto palette = currentTeamsStylePalette();
+        this->setBackgroundColor(palette.canvas);
+        this->backgroundColorAnimation.setStartValue(palette.raisedSurface);
+        this->backgroundColorAnimation.setEndValue(palette.canvas);
+        this->backgroundColorAnimation.stop();
+        this->ui_.replyLabel->setStyleSheet(
+            QString("color: %1").arg(palette.secondaryText.name()));
+        QPalette labelPalette;
+        labelPalette.setColor(QPalette::WindowText, palette.secondaryText);
+        this->ui_.textEditLength->setPalette(labelPalette);
+        this->ui_.sendWaitStatus->setPalette(labelPalette);
+        this->ui_.teamsEmoteButton->setColor(palette.icon);
+        this->ui_.teamsEmoteButton->setMouseEffectColor(palette.hover);
+        this->ui_.teamsSendButton->setColor(palette.accent);
+        this->ui_.teamsSendButton->setMouseEffectColor(palette.hover);
+        static_cast<TeamsComposerFrame *>(this->ui_.inputWrapper)
+            ->setTeamsStyle(true, this->scale());
+        this->applyOuterMargin();
+        this->updateTeamsScrollbarStyle();
+        this->updateTeamsSendButtonState();
+        this->updateTextEditPalette();
+        this->update();
+        return;
+    }
+
     {
         QPalette palette;
         palette.setColor(QPalette::WindowText, this->theme->splits.input.text);
@@ -442,6 +584,69 @@ void SplitInput::updateEmoteButton()
     this->ui_.emoteButton->setFixedHeight(int(18 * scale));
     // Make button slightly wider so it's easier to click
     this->ui_.emoteButton->setFixedWidth(int(24 * scale));
+    this->ui_.teamsEmoteButton->setFixedSize(int(32 * scale),
+                                             int(40 * scale));
+    this->ui_.teamsSendButton->setFixedSize(int(32 * scale), int(40 * scale));
+    static_cast<TeamsComposerFrame *>(this->ui_.inputWrapper)
+        ->setTeamsStyle(this->teamsStyle_, scale);
+}
+
+bool SplitInput::teamsCanSend(const QString &text) const
+{
+    if (text.trimmed().isEmpty())
+    {
+        return false;
+    }
+
+    const auto channel = this->split_->getSelectedChannel();
+    if (channel->isTwitchChannel())
+    {
+        return getApp()->getAccounts()->twitch.isLoggedIn();
+    }
+    if (channel->isKickChannel())
+    {
+        return getApp()->getAccounts()->kick.isLoggedIn();
+    }
+    return true;
+}
+
+void SplitInput::updateTeamsSendButtonState()
+{
+    const auto palette = currentTeamsStylePalette();
+    const auto enabled =
+        !this->teamsStyle_ || this->teamsCanSend(this->getInputText());
+    this->ui_.teamsSendButton->setEnabled(enabled);
+    this->ui_.teamsSendButton->setColor(
+        enabled ? palette.accent : teamsDisabledIconColor(palette));
+}
+
+void SplitInput::updateTeamsScrollbarStyle()
+{
+    if (!this->teamsStyle_)
+    {
+        this->ui_.textEdit->setStyleSheet({});
+        return;
+    }
+
+    const auto palette = currentTeamsStylePalette();
+    const auto width = std::max(4, int(4 * this->scale()));
+    const auto radius = std::max(2, int(2 * this->scale()));
+    this->ui_.textEdit->setStyleSheet(
+        QString(
+            "QTextEdit { background: %4; color: %5; border: none; }"
+            "QScrollBar:vertical { background: transparent; width: %1px; "
+            "margin: 4px 0; }"
+            "QScrollBar::handle:vertical { background: %2; min-height: "
+            "18px; border-radius: %3px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { "
+            "height: 0; }"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { "
+            "background: transparent; }")
+            .arg(width)
+            .arg(palette.controlBorder.name())
+            .arg(radius)
+            .arg(palette.canvas.name())
+            .arg(palette.primaryText.name()));
 }
 
 void SplitInput::updateCancelReplyButton()
@@ -488,6 +693,12 @@ void SplitInput::openEmotePopup()
 
 QString SplitInput::handleSendMessage(const std::vector<QString> &arguments)
 {
+    if (this->teamsStyle_ &&
+        !this->teamsCanSend(this->ui_.textEdit->toPlainText()))
+    {
+        return {};
+    }
+
     ChannelPtr c;
     if (this->replyTarget_)
     {
@@ -577,6 +788,11 @@ void SplitInput::postMessageSend(const QString &message,
 
 int SplitInput::scaledMaxHeight() const
 {
+    if (this->teamsStyle_)
+    {
+        return int((this->replyTarget_ != nullptr ? 180 : 110) *
+                   this->scale());
+    }
     if (this->replyTarget_ != nullptr)
     {
         // give more space for showing the message being replied to
@@ -1339,6 +1555,7 @@ void SplitInput::editTextChanged()
     }
 
     this->ui_.textEditLength->setText(labelText);
+    this->updateTeamsSendButtonState();
 
     bool hasReply = false;
     if (this->enableInlineReplying_)
@@ -1371,6 +1588,13 @@ void SplitInput::editTextChanged()
 void SplitInput::paintEvent(QPaintEvent * /*event*/)
 {
     QPainter painter(this);
+
+    if (this->teamsStyle_)
+    {
+        const auto palette = currentTeamsStylePalette();
+        painter.fillRect(this->rect(), palette.canvas);
+        return;
+    }
 
     QColor borderColor =
         this->theme->isLightTheme() ? QColor("#ccc") : QColor("#333");
@@ -1558,6 +1782,10 @@ bool SplitInput::shouldPreventInput(const QString &text) const
 
 int SplitInput::marginForTheme() const
 {
+    if (this->teamsStyle_)
+    {
+        return 0;
+    }
     if (this->theme->isLightTheme())
     {
         return int(3 * this->scale());
@@ -1570,6 +1798,13 @@ int SplitInput::marginForTheme() const
 
 void SplitInput::applyOuterMargin()
 {
+    if (this->teamsStyle_)
+    {
+        this->ui_.vbox->setContentsMargins(
+            int(44 * this->scale()), int(14 * this->scale()),
+            int(44 * this->scale()), int(24 * this->scale()));
+        return;
+    }
     auto margin = std::max(this->marginForTheme() - 1, 0);
     this->ui_.vbox->setContentsMargins(margin, margin, margin, margin);
 }
@@ -1582,6 +1817,18 @@ int SplitInput::replyMessageWidth() const
 void SplitInput::updateTextEditPalette()
 {
     QPalette p;
+
+    if (this->teamsStyle_)
+    {
+        const auto palette = currentTeamsStylePalette();
+        p.setColor(QPalette::PlaceholderText, palette.secondaryText);
+        p.setColor(QPalette::Text, palette.primaryText);
+        p.setBrush(QPalette::Highlight, palette.selection);
+        p.setColor(QPalette::HighlightedText, palette.primaryText);
+        p.setBrush(QPalette::Base, palette.canvas);
+        this->ui_.textEdit->setPalette(p);
+        return;
+    }
 
     // Placeholder text color
     p.setColor(QPalette::PlaceholderText,
@@ -1600,6 +1847,46 @@ void SplitInput::updateTextEditPalette()
     p.setBrush(QPalette::Base, this->backgroundColor());
 
     this->ui_.textEdit->setPalette(p);
+}
+
+void SplitInput::setTeamsStyle(bool enabled)
+{
+    if (this->teamsStyle_ == enabled)
+    {
+        return;
+    }
+
+    this->teamsStyle_ = enabled;
+    this->applyOuterMargin();
+
+    if (enabled)
+    {
+        this->ui_.inputWrapper->setMinimumHeight(int(58 * this->scale()));
+        this->ui_.inputHbox->setContentsMargins(
+            int(16 * this->scale()), int(8 * this->scale()),
+            int(8 * this->scale()), int(8 * this->scale()));
+        this->ui_.sendButton->hide();
+        this->ui_.emoteButton->hide();
+        this->ui_.teamsEmoteButton->show();
+        this->ui_.teamsSendButton->show();
+        static_cast<TeamsComposerFrame *>(this->ui_.inputWrapper)
+            ->setFocused(this->ui_.textEdit->hasFocus());
+        this->setBackgroundColor(currentTeamsStylePalette().canvas);
+    }
+    else
+    {
+        this->ui_.inputWrapper->setMinimumHeight(0);
+        this->ui_.inputHbox->setContentsMargins(0, 0, 0, 0);
+        this->ui_.emoteButton->show();
+        this->ui_.teamsEmoteButton->hide();
+        this->ui_.teamsSendButton->hide();
+        this->ui_.sendButton->setVisible(getSettings()->showSendButton);
+        this->updateTeamsScrollbarStyle();
+    }
+
+    this->setMaximumHeight(this->scaledMaxHeight());
+    this->updateFonts();
+    this->themeChangedEvent();
 }
 
 QColor SplitInput::backgroundColor() const
@@ -1651,8 +1938,15 @@ void SplitInput::checkSpellingChanged()
 void SplitInput::updateFonts()
 {
     auto *app = getApp();
-    this->ui_.textEdit->setFont(
-        app->getFonts()->getFont(FontStyle::ChatMedium, this->scale()));
+    auto inputFont =
+        app->getFonts()->getFont(FontStyle::ChatMedium, this->scale());
+    if (this->teamsStyle_)
+    {
+        inputFont = QFont("Segoe UI");
+        inputFont.setPointSizeF(11.0 * this->scale());
+    }
+    this->ui_.textEdit->setFont(inputFont);
+    this->ui_.textEdit->document()->setDefaultFont(inputFont);
 
     // NOTE: We're using TimestampMedium here to get a font that uses the tnum font feature,
     // meaning numbers get equal width & don't bounce around while the user is typing.
@@ -1878,6 +2172,7 @@ void SplitInput::updateChannel()
     auto selected = this->split_->getSelectedChannel();
     this->ui_.textEdit->setCompleter(new QCompleter(selected->completionModel));
     this->inputHighlighter->setChannel(selected);
+    this->updateTeamsSendButtonState();
 }
 
 }  // namespace chatterino

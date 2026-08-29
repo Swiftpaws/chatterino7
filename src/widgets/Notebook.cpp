@@ -156,11 +156,21 @@ NotebookTab *Notebook::addPageAt(QWidget *page, int position, QString title,
 
     this->performLayout();
     tab->setVisible(this->shouldShowTab(tab));
+    this->pageCountChanged.invoke(this->items_.count());
     return tab;
 }
 
 void Notebook::removePage(QWidget *page)
 {
+    if (this->items_.count() == 1)
+    {
+        if (auto *window = qobject_cast<Window *>(this->window());
+            window != nullptr && window->isTeamsStyle())
+        {
+            return;
+        }
+    }
+
     // Queue up save because: Tab removed
     getApp()->getWindows()->queueSave();
 
@@ -208,6 +218,7 @@ void Notebook::removePage(QWidget *page)
     this->items_.removeAt(removingIndex);
 
     this->performLayout(true);
+    this->pageCountChanged.invoke(this->items_.count());
 }
 
 void Notebook::duplicatePage(QWidget *page)
@@ -384,6 +395,7 @@ void Notebook::select(QWidget *page, bool focusPage, bool recordInHistory)
 
     this->performLayout();
     this->updateTabVisibility();
+    this->selectedPageChanged.invoke(this->selectedPage_);
 }
 
 void Notebook::selectHistoryBack(bool focusPage)
@@ -695,6 +707,7 @@ void Notebook::rearrangePage(QWidget *page, int index)
     this->items_.move(this->indexOf(page), index);
 
     this->performLayout(true);
+    this->pagesReordered.invoke();
 }
 
 bool Notebook::getAllowUserTabManagement() const
@@ -804,6 +817,14 @@ void Notebook::setShowAddButton(bool value)
     this->refresh();
 }
 
+void Notebook::setTabsVisible(bool value)
+{
+    this->showTabs_ = value;
+    this->setShowAddButton(value);
+    this->performLayout();
+    this->updateTabVisibility();
+}
+
 void Notebook::resizeAddButton()
 {
     int h = static_cast<int>((NOTEBOOK_TAB_HEIGHT - 1) * this->scale());
@@ -856,9 +877,11 @@ void Notebook::performLayout(bool animated)
         .bottom = this->height(),
         .scale = scale,
         .tabHeight = tabHeight,
-        .minimumTabAreaSpace = static_cast<int>(tabHeight * 0.5),
+        .minimumTabAreaSpace = this->showTabs_
+                                   ? static_cast<int>(tabHeight * 0.5)
+                                   : 0,
         .addButtonWidth = this->showAddButton_ ? tabHeight : 0,
-        .lineThickness = static_cast<int>(2 * scale),
+        .lineThickness = this->showTabs_ ? static_cast<int>(2 * scale) : 0,
         .tabSpacer = std::max(1, static_cast<int>(scale)),
         .buttonWidth = tabHeight,
         .buttonHeight = tabHeight - 1,
@@ -1233,6 +1256,11 @@ void Notebook::setTabLocation(NotebookTabLocation location)
 
 void Notebook::paintEvent(QPaintEvent *event)
 {
+    if (!this->showTabs_)
+    {
+        return;
+    }
+
     auto scale = this->scale();
 
     QPainter painter(this);
@@ -1364,7 +1392,15 @@ SplitNotebook::SplitNotebook(Window *parent)
 {
     QObject::connect(this->addButton_, &Button::leftClicked, [this]() {
         QTimer::singleShot(80, this, [this] {
-            this->addPage(true);
+            if (auto *window = qobject_cast<Window *>(this->window());
+                window != nullptr && window->isTeamsStyle())
+            {
+                window->openTeamsNewChat();
+            }
+            else
+            {
+                this->addPage(true);
+            }
         });
     });
 

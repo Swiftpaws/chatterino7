@@ -156,6 +156,14 @@ void GeneralPage::initLayout(GeneralPageView &layout)
             ->addTo(layout);
     }
 
+    SettingWidget::checkbox("Use Teams-style single-window mode",
+                            s.teamsStyleMode)
+        ->setTooltip(
+            "Launches one compact Teams-inspired chat window. Normal tabs and "
+            "splits use a separate saved layout and return when this mode is "
+            "disabled. Restart Chatterino after changing this option.")
+        ->addTo(layout);
+
     layout.addDropdown<float>(
         "Zoom", ZOOM_LEVELS, s.uiScale,
         [](auto val) {

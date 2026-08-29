@@ -7,6 +7,7 @@
 #include "Application.hpp"
 #include "common/Args.hpp"
 #include "common/QLogging.hpp"
+#include "common/TeamsStyleMode.hpp"
 #include "debug/AssertInGuiThread.hpp"
 #include "messages/MessageElement.hpp"
 #include "providers/kick/KickChannel.hpp"
@@ -32,6 +33,7 @@
 
 #include <pajlada/settings/backup.hpp>
 #include <QDebug>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -41,6 +43,7 @@
 
 #include <chrono>
 #include <optional>
+#include <ranges>
 
 using namespace Qt::Literals;
 
@@ -70,12 +73,178 @@ void closeWindowsRecursive(QWidget *window)
     }
 }
 
+std::optional<chatterino::SplitNodeDescriptor> firstSplit(
+    const chatterino::NodeDescriptor &node)
+{
+    return std::visit(
+        [](const auto &value)
+            -> std::optional<chatterino::SplitNodeDescriptor> {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T,
+                                         chatterino::SplitNodeDescriptor>)
+            {
+                if (!value.channelName_.isEmpty())
+                {
+                    auto result = value;
+                    result.flexH_ = 1;
+                    result.flexV_ = 1;
+                    return result;
+                }
+            }
+            else
+            {
+                for (const auto &child : value.items_)
+                {
+                    if (auto result = firstSplit(child))
+                    {
+                        return result;
+                    }
+                }
+            }
+            return std::nullopt;
+        },
+        node);
+}
+
+chatterino::WindowLayout makeTeamsLayout(
+    const chatterino::WindowLayout &source, bool preferLegacyPopup)
+{
+    using namespace chatterino;
+
+    WindowLayout result;
+    result.emotePopupBounds_ = source.emotePopupBounds_;
+
+    const WindowDescriptor *sourceWindow = nullptr;
+    std::optional<SplitNodeDescriptor> selectedSplit;
+
+    const auto inspectWindow = [&](const WindowDescriptor &window,
+                                   bool selectedTabsOnly) {
+        for (const auto &tab : window.tabs_)
+        {
+            if (selectedTabsOnly && !tab.selected_)
+            {
+                continue;
+            }
+            if (tab.rootNode_)
+            {
+                if (auto split = firstSplit(*tab.rootNode_))
+                {
+                    sourceWindow = &window;
+                    selectedSplit = std::move(split);
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // The unreleased first pass stored its single channel in a popup. Prefer
+    // that once when creating the independent Teams layout.
+    for (const auto &window : source.windows_)
+    {
+        if (preferLegacyPopup && window.type_ == WindowType::Popup &&
+            inspectWindow(window, false))
+        {
+            break;
+        }
+    }
+    if (!selectedSplit)
+    {
+        for (const auto &window : source.windows_)
+        {
+            if (window.type_ == WindowType::Main && inspectWindow(window, true))
+            {
+                break;
+            }
+        }
+    }
+    if (!selectedSplit)
+    {
+        for (const auto &window : source.windows_)
+        {
+            if (window.type_ == WindowType::Main && inspectWindow(window, false))
+            {
+                break;
+            }
+        }
+    }
+
+    WindowDescriptor window;
+    window.type_ = WindowType::Main;
+    window.geometry_ = sourceWindow != nullptr
+                           ? sourceWindow->geometry_
+                           : QRect(-1, -1, 773, 931);
+
+    TabDescriptor tab;
+    tab.selected_ = true;
+    tab.rootNode_ = selectedSplit.value_or(SplitNodeDescriptor{});
+    window.tabs_.push_back(std::move(tab));
+    result.windows_.push_back(std::move(window));
+    return result;
+}
+
+chatterino::WindowLayout sanitizeTeamsLayout(
+    const chatterino::WindowLayout &source)
+{
+    using namespace chatterino;
+
+    WindowLayout result;
+    result.emotePopupBounds_ = source.emotePopupBounds_;
+    const auto main = std::ranges::find_if(source.windows_, [](const auto &w) {
+        return w.type_ == WindowType::Main;
+    });
+    if (main == source.windows_.end())
+    {
+        return makeTeamsLayout(source, false);
+    }
+
+    auto window = *main;
+    window.type_ = WindowType::Main;
+    window.popupID.reset();
+    bool hasSelected = false;
+    for (auto &tab : window.tabs_)
+    {
+        if (tab.rootNode_)
+        {
+            tab.rootNode_ = firstSplit(*tab.rootNode_)
+                                .value_or(SplitNodeDescriptor{});
+        }
+        else
+        {
+            tab.rootNode_ = SplitNodeDescriptor{};
+        }
+        if (tab.selected_ && !hasSelected)
+        {
+            hasSelected = true;
+        }
+        else
+        {
+            tab.selected_ = false;
+        }
+    }
+    if (window.tabs_.empty())
+    {
+        TabDescriptor tab;
+        tab.selected_ = true;
+        tab.rootNode_ = SplitNodeDescriptor{};
+        window.tabs_.push_back(std::move(tab));
+    }
+    else if (!hasSelected)
+    {
+        window.tabs_.front().selected_ = true;
+    }
+    result.windows_.push_back(std::move(window));
+    return result;
+}
+
 }  // namespace
 
 namespace chatterino {
 
 const QString WindowManager::WINDOW_LAYOUT_FILENAME(
-    QStringLiteral("window-layout.json"));
+    teamsWindowLayoutFileName(false));
+const QString WindowManager::TEAMS_WINDOW_LAYOUT_FILENAME(
+    teamsWindowLayoutFileName(true));
 
 using SplitNode = SplitContainer::Node;
 
@@ -119,6 +288,9 @@ WindowManager::WindowManager(const Args &appArgs_, const Paths &paths,
     , appArgs(appArgs_)
     , windowLayoutFilePath(combinePath(paths.settingsDirectory,
                                        WindowManager::WINDOW_LAYOUT_FILENAME))
+    , teamsWindowLayoutFilePath(
+          combinePath(paths.settingsDirectory,
+                      WindowManager::TEAMS_WINDOW_LAYOUT_FILENAME))
     , updateWordTypeMaskListener([this] {
         this->updateWordTypeMask();
     })
@@ -447,10 +619,12 @@ void WindowManager::initialize()
 
     {
         WindowLayout windowLayout;
+        const auto hasTeamsLayout =
+            QFileInfo::exists(this->teamsWindowLayoutFilePath);
 
+        const auto &layoutPath = this->activeWindowLayoutFilePath();
         if (std::optional<WindowLayout> layout =
-                this->appArgs.makeCustomChannelLayout(
-                    this->windowLayoutFilePath))
+                this->appArgs.makeCustomChannelLayout(layoutPath))
         {
             windowLayout = layout.value();
         }
@@ -463,6 +637,18 @@ void WindowManager::initialize()
         if (desired)
         {
             windowLayout.activateOrAddChannel(desired->provider, desired->name);
+        }
+
+        // Seed the independent Teams layout once. Existing Teams layouts keep
+        // all tabs and are only constrained to one split per tab.
+        if (teamsShouldSeedLayout(getSettings()->teamsStyleMode,
+                                  hasTeamsLayout))
+        {
+            windowLayout = makeTeamsLayout(windowLayout, !desired.has_value());
+        }
+        else if (getSettings()->teamsStyleMode)
+        {
+            windowLayout = sanitizeTeamsLayout(windowLayout);
         }
 
         this->emotePopupBounds_ = windowLayout.emotePopupBounds_;
@@ -488,6 +674,16 @@ void WindowManager::initialize()
             this->mainWindow_->hide();
         }
     }
+
+
+    if (getSettings()->teamsStyleMode)
+    {
+        auto *page = this->mainWindow_->getNotebook().getOrAddSelectedPage();
+        if (page->getSplits().empty())
+        {
+            page->appendNewSplit(false);
+        }
+    }
 }
 
 void WindowManager::save()
@@ -511,6 +707,11 @@ void WindowManager::save()
     QJsonArray windowArr;
     for (Window *window : this->windows_)
     {
+        if (getSettings()->teamsStyleMode &&
+            window->getType() != WindowType::Main)
+        {
+            continue;
+        }
         QJsonObject windowObj;
 
         // window type
@@ -584,7 +785,7 @@ void WindowManager::save()
     // save file
     std::error_code ec;
     pajlada::Settings::Backup::saveWithBackup(
-        qStringToStdPath(this->windowLayoutFilePath),
+        qStringToStdPath(this->activeWindowLayoutFilePath()),
         {.enabled = true, .numSlots = 9},
         [&](const auto &path, auto &ec) {
             QSaveFile file(stdPathToQString(path));
@@ -735,7 +936,18 @@ void WindowManager::incGeneration()
 
 WindowLayout WindowManager::loadWindowLayoutFromFile() const
 {
-    return WindowLayout::loadFromFile(this->windowLayoutFilePath);
+    if (getSettings()->teamsStyleMode &&
+        !QFileInfo::exists(this->teamsWindowLayoutFilePath))
+    {
+        return WindowLayout::loadFromFile(this->windowLayoutFilePath);
+    }
+    return WindowLayout::loadFromFile(this->activeWindowLayoutFilePath());
+}
+
+const QString &WindowManager::activeWindowLayoutFilePath() const
+{
+    return getSettings()->teamsStyleMode ? this->teamsWindowLayoutFilePath
+                                         : this->windowLayoutFilePath;
 }
 
 void WindowManager::applyWindowLayout(const WindowLayout &layout)

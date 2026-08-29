@@ -12,6 +12,13 @@
 
 namespace chatterino::detail {
 
+TEST(TwitchChannelDetail_ChatterCountGeneration, RejectsStaleResults)
+{
+    EXPECT_TRUE(shouldAcceptChatterCountResult(4, 4, true));
+    EXPECT_FALSE(shouldAcceptChatterCountResult(3, 4, true));
+    EXPECT_FALSE(shouldAcceptChatterCountResult(4, 4, false));
+}
+
 TEST(TwitchChannelDetail_isUnknownCommand, good)
 {
     // clang-format off

@@ -118,6 +118,7 @@ public:
     pajlada::Signals::Signal<SplitDirection, Split *> insertSplitRequested;
 
 protected:
+    void themeChangedEvent() override;
     void paintEvent(QPaintEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;

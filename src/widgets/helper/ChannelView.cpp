@@ -17,6 +17,7 @@
 #include "messages/layouts/MessageLayout.hpp"
 #include "messages/layouts/MessageLayoutContext.hpp"
 #include "messages/layouts/MessageLayoutElement.hpp"
+#include "messages/layouts/TeamsStyleMessage.hpp"
 #include "messages/Message.hpp"
 #include "messages/MessageBuilder.hpp"
 #include "messages/MessageElement.hpp"
@@ -48,6 +49,7 @@
 #include "widgets/dialogs/UserInfoPopup.hpp"
 #include "widgets/helper/ScrollbarHighlight.hpp"
 #include "widgets/helper/SearchPopup.hpp"
+#include "widgets/helper/TeamsStyle.hpp"
 #include "widgets/Notebook.hpp"
 #include "widgets/Scrollbar.hpp"
 #include "widgets/splits/Split.hpp"
@@ -378,6 +380,7 @@ ChannelView::ChannelView(InternalCtor /*tag*/, QWidget *parent, Split *split,
 
     this->messageColors_.applyTheme(getTheme(), this->isOverlay_,
                                     getSettings()->overlayBackgroundOpacity);
+    this->applyTeamsStyleColors();
     this->messagePreferences_.connectSettings(getSettings(),
                                               this->signalHolder_);
 }
@@ -617,7 +620,37 @@ void ChannelView::themeChangedEvent()
     this->setupHighlightAnimationColors();
     this->messageColors_.applyTheme(getTheme(), this->isOverlay_,
                                     getSettings()->overlayBackgroundOpacity);
+    this->applyTeamsStyleColors();
     this->invalidateBuffers();
+}
+
+bool ChannelView::isTeamsStyle() const
+{
+    const auto *chatWindow = qobject_cast<const Window *>(this->window());
+    return chatWindow != nullptr && chatWindow->isTeamsStyle();
+}
+
+void ChannelView::applyTeamsStyleColors()
+{
+    if (!this->isTeamsStyle())
+    {
+        return;
+    }
+
+    const auto palette = currentTeamsStylePalette();
+    this->messageColors_.channelBackground = palette.canvas;
+    this->messageColors_.regularBg = palette.canvas;
+    this->messageColors_.alternateBg = palette.canvas;
+    this->messageColors_.regularText = palette.primaryText;
+    this->messageColors_.systemText = palette.secondaryText;
+    this->messageColors_.linkText = palette.accent;
+    this->messageColors_.selection = palette.selection;
+    this->messageColors_.messageSeperator = QColor(Qt::transparent);
+    this->messageColors_.hasTransparency = false;
+    this->goToBottom_->setStyleSheet(
+        QString("background-color: %1; color: %2; border-top: 1px solid %3;")
+            .arg(palette.raisedSurface.name(), palette.primaryText.name(),
+                 palette.divider.name()));
 }
 
 void ChannelView::updateColorTheme()
@@ -741,6 +774,7 @@ void ChannelView::layoutVisibleMessages(
                     .imageScale = this->scale() *
                                   static_cast<float>(this->devicePixelRatio()),
                     .selectedChannel = selectedChannel,
+                    .teamsStyle = this->isTeamsStyle(),
                     .message = *message->getMessage(),
                 },
                 this->bufferInvalidationQueued_);
@@ -787,6 +821,7 @@ void ChannelView::updateScrollbar(const std::vector<MessageLayoutPtr> &messages,
                 .imageScale = this->scale() *
                               static_cast<float>(this->devicePixelRatio()),
                 .selectedChannel = selectedChannel,
+                .teamsStyle = this->isTeamsStyle(),
                 .message = *message->getMessage(),
             },
             false);
@@ -1625,8 +1660,9 @@ MessageElementFlags ChannelView::getFlags() const
         flags.set(MessageElementFlag::ChannelName);
     }
 
-    if (this->context_ == Context::ReplyThread ||
-        getSettings()->hideReplyContext)
+    if (!this->isTeamsStyle() &&
+        (this->context_ == Context::ReplyThread ||
+         getSettings()->hideReplyContext))
     {
         // Don't show inline replies within the ReplyThreadPopup
         // or if they're hidden
@@ -1636,6 +1672,18 @@ MessageElementFlags ChannelView::getFlags() const
     if (!this->canReplyToMessages())
     {
         flags.unset(MessageElementFlag::ReplyButton);
+    }
+
+    if (this->isTeamsStyle())
+    {
+        flags.set(MessageElementFlag::Timestamp);
+        flags.set(MessageElementFlag::Username);
+        flags.set(MessageElementFlag::RepliedMessage);
+        flags = applyTeamsBadgeGate(
+            flags, getSettings()->teamsStyleShowBadges.getValue());
+        flags.unset(MessageElementFlag::ModeratorTools);
+        flags.unset(MessageElementFlag::ReplyButton);
+        flags.unset(MessageElementFlag::ChannelName);
     }
 
     return flags;
@@ -2004,6 +2052,7 @@ void ChannelView::wheelEvent(QWheelEvent *event)
                                 this->scale() *
                                 static_cast<float>(this->devicePixelRatio()),
                             .selectedChannel = selectedChannel,
+                            .teamsStyle = this->isTeamsStyle(),
                             .message = *snapshot[i - 1]->getMessage(),
                         },
                         false);
@@ -2049,6 +2098,7 @@ void ChannelView::wheelEvent(QWheelEvent *event)
                                 this->scale() *
                                 static_cast<float>(this->devicePixelRatio()),
                             .selectedChannel = selectedChannel,
+                            .teamsStyle = this->isTeamsStyle(),
                             .message = *snapshot[i + 1]->getMessage(),
                         },
                         false);

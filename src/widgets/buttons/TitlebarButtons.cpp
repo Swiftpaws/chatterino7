@@ -86,16 +86,22 @@ void TitleBarButtons::updateMaxButton()
 
 void TitleBarButtons::setSmallSize()
 {
-    this->minButton_->setScaleIndependentSize(30, 30);
-    this->maxButton_->setScaleIndependentSize(30, 30);
-    this->closeButton_->setScaleIndependentSize(30, 30);
+    this->minButton_->setScaleIndependentSize(30, this->height_);
+    this->maxButton_->setScaleIndependentSize(30, this->height_);
+    this->closeButton_->setScaleIndependentSize(30, this->height_);
 }
 
 void TitleBarButtons::setRegularSize()
 {
-    this->minButton_->setScaleIndependentSize(46, 30);
-    this->maxButton_->setScaleIndependentSize(46, 30);
-    this->closeButton_->setScaleIndependentSize(46, 30);
+    this->minButton_->setScaleIndependentSize(46, this->height_);
+    this->maxButton_->setScaleIndependentSize(46, this->height_);
+    this->closeButton_->setScaleIndependentSize(46, this->height_);
+}
+
+void TitleBarButtons::setHeight(int height)
+{
+    this->height_ = height;
+    this->setRegularSize();
 }
 
 TitleBarButton *TitleBarButtons::buttonForHt(size_t ht) const

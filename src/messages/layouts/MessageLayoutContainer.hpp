@@ -9,6 +9,7 @@
 #include "messages/MessageFlag.hpp"
 
 #include <QPoint>
+#include <QMargins>
 #include <QRect>
 
 #include <memory>
@@ -43,7 +44,7 @@ struct MessageLayoutContainer {
      * until the accompanying end function has been called
      */
     void beginLayout(qreal width, float scale, float imageScale,
-                     MessageFlags flags);
+                     MessageFlags flags, bool teamsStyle = false);
 
     /**
      * Finish the layout process of this message
@@ -190,6 +191,8 @@ struct MessageLayoutContainer {
     int nextWordId();
 
 private:
+    QMargins layoutMargins() const;
+
     struct Line {
         /**
          * The index of the first message element on this line
@@ -335,6 +338,7 @@ private:
      * Scale factor for images
      */
     float imageScale_ = 1.F;
+    bool teamsStyle_ = false;
     qreal width_ = 0;
     MessageFlags flags_{};
     /**
